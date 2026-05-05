@@ -9,6 +9,6 @@ marshmallow-sqlalchemy
 flask_bcrypt
 flask_jwt_extended
 python-dotenv
-fllask_mail
+flask_mail
 flask_restful
 gunicorn
