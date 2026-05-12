@@ -1,19 +1,21 @@
 from ..extensions import db
 import sqlalchemy as sa
+from datetime import datetime
 
 class User(db.Model):
+    __tablename__ = 'users'
+    
     id = db.Column(db.Integer, primary_key=True)
-
     phone = db.Column(db.String(100), unique=True, nullable=False)
     password = db.Column(db.String(255), nullable=False)
-    role = db.Column(db.String(50), default='customer')  # admin, merchant, customer
-    status = db.Column(db.String(50), default='pending')  # pending, approved, rejected
+    role = db.Column(db.String(50), default='customer')
+    status = db.Column(db.String(50), default='pending')
     
-    # Role-specific IDs (auto-generated on approval)
+    # Role-specific IDs
     customer_id = db.Column(db.String(50), unique=True, nullable=True, index=True)
     merchant_id = db.Column(db.String(50), unique=True, nullable=True, index=True)
 
-    # CUSTOMER FIELDS
+    # Customer Fields
     full_name = db.Column(db.String(100))
     dob = db.Column(db.String(50))
     national_id = db.Column(db.String(100))
@@ -24,28 +26,23 @@ class User(db.Model):
     company = db.Column(db.String(200))
     address = db.Column(db.String(200))
     income_range = db.Column(db.String(100))
-
     product_name = db.Column(db.String(200))
     total_price = db.Column(db.Float)
     payment_plan = db.Column(db.String(50))
     payment_frequency = db.Column(db.String(50))
-
     ref_name = db.Column(db.String(100))
     ref_phone = db.Column(db.String(100))
     ref_relationship = db.Column(db.String(100))
     shop_url = db.Column(db.String(200))
     
-    # MERCHANT FIELDS
+    # Merchant Fields
     business_name = db.Column(db.String(100))
     owner_name = db.Column(db.String(100))
     product_type = db.Column(db.String(100))
     has_shop = db.Column(db.String(10))
     years_in_business = db.Column(db.String(50))
-
     offers_credit = db.Column(db.String(10))
     price_range = db.Column(db.String(50))
-    
-    # NEW MERCHANT FIELDS
     business_type = db.Column(db.String(50))
     registration_number = db.Column(db.String(100))
     tax_id = db.Column(db.String(100))
@@ -58,22 +55,28 @@ class User(db.Model):
     total_sales = db.Column(db.Float, default=0)
     rating = db.Column(db.Float, default=0)
     verified = db.Column(db.Boolean, default=False)
-
     payment_method = db.Column(db.String(50))
     momo_name = db.Column(db.String(100))
     momo_number = db.Column(db.String(100))
-
     bank_name = db.Column(db.String(100))
     account_name = db.Column(db.String(100))
     account_number = db.Column(db.String(100))
     
+    # KYC Fields
+    kyc_status = db.Column(db.String(50), default='pending')
+    verification_level = db.Column(db.String(50), default='standard')
+    aml_screening = db.Column(db.String(50), default='pending')
+    kyc_completed_on = db.Column(db.DateTime)
+    
+    # Settlement Fields
+    commission_rate = db.Column(db.Float, default=2.5)
+    pending_payout = db.Column(db.Float, default=0)
+    next_settlement = db.Column(db.String(50))
+    
     created_at = db.Column(db.DateTime, server_default=db.func.now())
     updated_at = db.Column(db.DateTime, onupdate=db.func.now())
 
-    # ============================================
-    # REQUIRED FLASK-PRAETORIAN METHODS
-    # ============================================
-    
+    # Flask-Praetorian Methods
     @property
     def identity(self):
         return str(self.id)
@@ -95,38 +98,22 @@ class User(db.Model):
     
     @staticmethod
     def get_next_customer_id():
-        """Get the next customer ID number"""
         from sqlalchemy import func
-        
-        # Get the maximum customer_id number
         result = db.session.query(
             func.max(func.substr(User.customer_id, 2).cast(sa.Integer))
         ).filter(User.customer_id.isnot(None)).scalar()
-        
-        if result:
-            return result + 1
-        return 1
+        return (result + 1) if result else 1
     
     @staticmethod
     def get_next_merchant_id():
-        """Get the next merchant ID number"""
         from sqlalchemy import func
-        
-        # Get the maximum merchant_id number
         result = db.session.query(
             func.max(func.substr(User.merchant_id, 2).cast(sa.Integer))
         ).filter(User.merchant_id.isnot(None)).scalar()
-        
-        if result:
-            return result + 1
-        return 1
+        return (result + 1) if result else 1
     
     def generate_customer_id(self):
-        """Generate a customer ID in format C001, C002, etc."""
-        next_num = User.get_next_customer_id()
-        return f"C{next_num:03d}"
+        return f"C{User.get_next_customer_id():03d}"
     
     def generate_merchant_id(self):
-        """Generate a merchant ID in format M001, M002, etc."""
-        next_num = User.get_next_merchant_id()
-        return f"M{next_num:03d}"
+        return f"M{User.get_next_merchant_id():03d}"
