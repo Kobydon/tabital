@@ -63,6 +63,41 @@ from .resources.merchant_customers import (
     MerchantExportCustomersResource
 )
 
+
+from .resources.merchant_settlements import (
+    MerchantGetSettlementsResource,
+    MerchantGetSettlementSummaryResource,
+    MerchantRequestPayoutResource,
+    MerchantUpdateSettlementSettingsResource,
+    MerchantGetSettlementDetailsResource
+)
+
+
+from .resources.merchant_disputes import (
+    MerchantGetDisputesResource,
+    MerchantGetDisputeStatsResource,
+    MerchantGetDisputeDetailsResource,
+    MerchantUpdateDisputeResource,
+    MerchantAcceptDisputeResource,
+    MerchantRejectDisputeResource,
+    MerchantEscalateDisputeResource
+)
+
+from .resources.merchant_settings import (
+    MerchantGetProfileResource,
+    MerchantUpdateProfileResource,
+    MerchantUpdatePasswordResource,
+    MerchantUpdatePaymentSettingsResource,
+    MerchantGetNotificationSettingsResource,
+    MerchantUpdateNotificationSettingsResource,
+    MerchantGetPreferencesResource,
+    MerchantUpdatePreferencesResource,
+    MerchantUpdateKYCResource,
+    MerchantUploadDocumentResource,
+    MerchantGetActivityLogResource
+)
+
+
 def register_routes(app):
     api = Api(app)
 
@@ -131,6 +166,8 @@ def register_routes(app):
 
     # Add to imports
 
+    
+
 # Add to register_routes function:
 
     # ============================================
@@ -172,3 +209,52 @@ def register_routes(app):
     api.add_resource(MerchantUpdateCustomerResource, "/merchant/customers/<int:customer_id>")
     api.add_resource(MerchantGetCustomerStatsResource, "/merchant/customers/stats")
     api.add_resource(MerchantExportCustomersResource, "/merchant/customers/export")
+
+
+    
+
+
+# Add to register_routes function:
+
+    # ============================================
+    # MERCHANT SETTLEMENT ROUTES
+    # ============================================
+    api.add_resource(MerchantGetSettlementsResource, "/merchant/settlements")
+    api.add_resource(MerchantGetSettlementSummaryResource, "/merchant/settlements/summary")
+    api.add_resource(MerchantRequestPayoutResource, "/merchant/settlements/request-payout")
+    api.add_resource(MerchantUpdateSettlementSettingsResource, "/merchant/settlements/settings")
+    api.add_resource(MerchantGetSettlementDetailsResource, "/merchant/settlements/<string:settlement_id>")
+
+    
+
+# Add to register_routes function:
+
+    # ============================================
+    # MERCHANT DISPUTE ROUTES
+    # ============================================
+    api.add_resource(MerchantGetDisputesResource, "/merchant/disputes")
+    api.add_resource(MerchantGetDisputeStatsResource, "/merchant/disputes/stats")
+    api.add_resource(MerchantGetDisputeDetailsResource, "/merchant/disputes/<int:dispute_id>")
+    api.add_resource(MerchantUpdateDisputeResource, "/merchant/disputes/<int:dispute_id>")
+    api.add_resource(MerchantAcceptDisputeResource, "/merchant/disputes/<int:dispute_id>/accept")
+    api.add_resource(MerchantRejectDisputeResource, "/merchant/disputes/<int:dispute_id>/reject")
+    api.add_resource(MerchantEscalateDisputeResource, "/merchant/disputes/<int:dispute_id>/escalate")
+
+    # Add to imports
+
+# Add to register_routes function:
+
+    # ============================================
+    # MERCHANT SETTINGS ROUTES
+    # ============================================
+    api.add_resource(MerchantGetProfileResource, "/merchant/settings/profile")
+    api.add_resource(MerchantUpdateProfileResource, "/merchant/settings/profile")
+    api.add_resource(MerchantUpdatePasswordResource, "/merchant/settings/password")
+    api.add_resource(MerchantUpdatePaymentSettingsResource, "/merchant/settings/payment")
+    api.add_resource(MerchantGetNotificationSettingsResource, "/merchant/settings/notifications")
+    api.add_resource(MerchantUpdateNotificationSettingsResource, "/merchant/settings/notifications")
+    api.add_resource(MerchantGetPreferencesResource, "/merchant/settings/preferences")
+    api.add_resource(MerchantUpdatePreferencesResource, "/merchant/settings/preferences")
+    api.add_resource(MerchantUpdateKYCResource, "/merchant/settings/kyc")
+    api.add_resource(MerchantUploadDocumentResource, "/merchant/settings/upload-document")
+    api.add_resource(MerchantGetActivityLogResource, "/merchant/settings/activity-log")
