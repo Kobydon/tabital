@@ -15,7 +15,8 @@ def create_app():
     # ✅ Configure CORS properly
     CORS(app, 
          resources={r"/*": {
-             "origins": ["http://localhost:4200", "http://127.0.0.1:4200", "http://localhost:5000","https://tabital.onrender.com"],
+             "origins": ["http://localhost:4200", "http://127.0.0.1:4200", "http://localhost:5000","https://tabital.onrender.com",
+                         "https://app.tabitalpay.com"],
              "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
              "allow_headers": ["Content-Type", "Authorization", "X-Requested-With"],
              "expose_headers": ["Content-Type", "Authorization"],
