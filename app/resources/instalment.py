@@ -3,7 +3,8 @@ from flask_praetorian import auth_required, current_user
 from ..models.user import User
 from ..models.transaction import Transaction
 from ..models.instalment import *
-
+from ..models.instalment import InstalmentPlan
+from ..models.instalment_payment import InstalmentPayment
 from ..extensions import db
 from datetime import datetime, timedelta
 

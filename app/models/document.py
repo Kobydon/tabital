@@ -1,3 +1,4 @@
+# models/document.py
 from ..extensions import db
 from datetime import datetime
 
@@ -6,10 +7,15 @@ class Document(db.Model):
     
     id = db.Column(db.Integer, primary_key=True)
     document_id = db.Column(db.String(50), unique=True, nullable=False, index=True)
-    merchant_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    
+    # This column can be merchant_id for merchants OR customer_id for customers
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
     
     # Document details
-    document_type = db.Column(db.String(50), nullable=False)  # business_registration, trade_license, bank_proof, tax_certificate
+    document_type = db.Column(db.String(50), nullable=False)  
+    # For merchants: business_registration, trade_license, bank_proof, tax_certificate
+    # For customers: kyc_front, kyc_back, passport_photo, proof_of_address
+    
     document_name = db.Column(db.String(200), nullable=False)
     file_path = db.Column(db.String(500))
     file_name = db.Column(db.String(200))
@@ -32,7 +38,7 @@ class Document(db.Model):
     updated_at = db.Column(db.DateTime, onupdate=datetime.utcnow)
     
     # Relationships
-    merchant = db.relationship('User', foreign_keys=[merchant_id], backref='documents')
+    user = db.relationship('User', foreign_keys=[user_id], backref='documents')
     uploader = db.relationship('User', foreign_keys=[uploaded_by], backref='uploaded_documents')
     verifier = db.relationship('User', foreign_keys=[verified_by], backref='verified_documents')
     

@@ -28,6 +28,7 @@ class Transaction(db.Model):
     delivery_status = db.Column(db.String(50), default='pending')
     tracking_number = db.Column(db.String(100))
     notes = db.Column(db.Text)
+    payment_plan = db.Column(db.String(50), nullable=True)
     
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, onupdate=datetime.utcnow)

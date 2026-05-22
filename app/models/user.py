@@ -10,7 +10,7 @@ class User(db.Model):
     password = db.Column(db.String(255), nullable=False)
     role = db.Column(db.String(50), default='customer')
     status = db.Column(db.String(50), default='pending')
-    
+    swift_code=db.Column(db.String(50))
     # Role-specific IDs
     customer_id = db.Column(db.String(50), unique=True, nullable=True, index=True)
     merchant_id = db.Column(db.String(50), unique=True, nullable=True, index=True)
@@ -49,6 +49,7 @@ class User(db.Model):
     business_address = db.Column(db.String(200))
     business_phone = db.Column(db.String(20))
     business_email = db.Column(db.String(100))
+    email=db.Column(db.String(100))
     website = db.Column(db.String(200))
     description = db.Column(db.Text)
     total_products = db.Column(db.Integer, default=0)

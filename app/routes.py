@@ -1,5 +1,7 @@
+# app/routes.py
 from flask_restful import Api
 
+# Admin Resources
 from .resources.admin import (
     PendingUsersResource,
     ApproveUserResource,
@@ -17,36 +19,17 @@ from .resources.admin import (
     MerchantKYCResource,
     MerchantCommissionResource,
     MerchantSettlementResource,
-    GetCurrentUserResource
+    GetCurrentUserResource,
+     AdminApproveOrderResource,
 )
+
+# Transaction Resources
 from .resources.transaction import (
     GetTransactionsResource,
     CreateTransactionResource,
     UpdateTransactionStatusResource,
     GetTransactionStatsResource,
-    DeleteTransactionResource
-)
-from .resources.document import (
-    GetMerchantDocumentsResource,
-    UploadDocumentResource,
-    VerifyDocumentResource,
-    DeleteDocumentResource
-)
-
-from .resources.instalment import (
-    GetMerchantInstalmentsResource,
-    CreateInstalmentPlanResource,
-    UpdateInstalmentPlanResource,
-    DeleteInstalmentPlanResource,
-    GetInstalmentPlanDetailsResource,
-    RecordInstalmentPaymentResource
-)
-
-from .resources.auth import RegisterResource, LoginResource
-from .resources.protected import ProtectedResource
-from .resources.admin_stats import AdminStatsResource
-
-from .resources.transaction import (
+    DeleteTransactionResource,
     MerchantGetTransactionsResource,
     MerchantGetTransactionStatsResource,
     MerchantUpdateTransactionStatusResource,
@@ -55,6 +38,35 @@ from .resources.transaction import (
     MerchantExportTransactionsResource
 )
 
+# Document Resources
+from .resources.document import (
+    GetMerchantDocumentsResource,
+    UploadDocumentResource,
+    VerifyDocumentResource,
+    DeleteDocumentResource
+)
+
+# Auth Resources
+from .resources.auth import RegisterResource, LoginResource
+
+# Protected Resources
+from .resources.protected import ProtectedResource
+
+# Admin Stats Resources
+from .resources.admin_stats import AdminStatsResource
+
+# Merchant Dashboard Resources
+from .resources.merchant_dashboard import (
+    MerchantDashboardStatsResource,
+    MerchantSalesChartResource,
+    MerchantRecentTransactionsResource,
+    MerchantInstalmentsOverviewResource,
+    MerchantSettlementInfoResource,
+    MerchantAccountStatusResource,
+    MerchantQuickActionsResource
+)
+
+# Merchant Customers Resources
 from .resources.merchant_customers import (
     MerchantGetCustomersResource,
     MerchantGetCustomerDetailsResource,
@@ -63,7 +75,7 @@ from .resources.merchant_customers import (
     MerchantExportCustomersResource
 )
 
-
+# Merchant Settlements Resources
 from .resources.merchant_settlements import (
     MerchantGetSettlementsResource,
     MerchantGetSettlementSummaryResource,
@@ -72,7 +84,7 @@ from .resources.merchant_settlements import (
     MerchantGetSettlementDetailsResource
 )
 
-
+# Merchant Disputes Resources
 from .resources.merchant_disputes import (
     MerchantGetDisputesResource,
     MerchantGetDisputeStatsResource,
@@ -83,6 +95,17 @@ from .resources.merchant_disputes import (
     MerchantEscalateDisputeResource
 )
 
+# Merchant Reports Resources
+from .resources.merchant_reports import (
+    MerchantSalesReportResource,
+    MerchantTransactionReportResource,
+    MerchantCustomerReportResource,
+    MerchantFinancialReportResource,
+    MerchantInstalmentReportResource,
+    MerchantExportReportResource
+)
+
+# Merchant Settings Resources
 from .resources.merchant_settings import (
     MerchantGetProfileResource,
     MerchantUpdateProfileResource,
@@ -96,6 +119,158 @@ from .resources.merchant_settings import (
     MerchantUploadDocumentResource,
     MerchantGetActivityLogResource
 )
+
+# Customer Resources
+from .resources.customer_dashboard import (
+    CustomerDashboardStatsResource,
+    CustomerPaymentOverviewResource,
+    CustomerUpcomingPaymentsResource,
+    CustomerRecentTransactionsResource,
+    CustomerInstalmentsResource,
+    CustomerPlanDetailsResource,
+    CustomerMakePaymentResource
+)
+
+from .resources.customer_profile import (
+    CustomerGetProfileResource,
+    CustomerUpdateProfileResource,
+    CustomerUpdatePasswordResource,
+    CustomerGetKYCStatusResource,
+    CustomerUploadKYCResource,
+    CustomerGetActivityLogResource
+)
+
+from .resources.customer_notifications import (
+    CustomerGetNotificationsResource,
+    CustomerMarkNotificationReadResource,
+    CustomerMarkAllNotificationsReadResource,
+    CustomerGetNotificationSettingsResource,
+    CustomerUpdateNotificationSettingsResource,
+    CustomerUnreadNotificationCountResource
+)
+
+# routes.py - Add these imports
+
+from .resources.customer_payments import (
+    CustomerGetPaymentsResource,
+    CustomerGetPaymentStatsResource,
+    CustomerDownloadReceiptResource,
+    CustomerPaidPaymentsResource,
+    CustomerPaymentReminderResource,
+    CustomerMakePaymentResource
+)
+
+from .resources.customer_transactions import (
+    CustomerGetTransactionsResource,
+    CustomerGetTransactionDetailsResource,
+    CustomerGetTransactionStatsResource,
+    CustomerExportTransactionsResource
+)
+
+from .resources.customer_support import (
+    CustomerCreateTicketResource,
+    CustomerGetTicketsResource,
+    CustomerGetTicketDetailsResource,
+    CustomerAddTicketMessageResource,
+    CustomerCloseTicketResource
+)
+
+# System Settings Resources
+from .resources.system_settings import (
+    SystemSettingsResource,
+    InstallmentCalculatorResource,
+    LateFeeCalculatorResource
+)
+
+from .resources.system_settings import (
+    SystemSettingsResource,
+    InstallmentOptionsResource,  # Add this
+    InstallmentCalculatorResource,
+    LateFeeCalculatorResource
+)
+
+from .resources.product import (
+    MerchantProductsResource,
+    MerchantProductDetailResource
+)
+
+from .resources.admin_orders import (
+    AdminGetOrdersResource,
+   
+    AdminRejectOrderResource
+)
+from .resources.merchant_orders import (
+    MerchantGetOrdersResource,
+    MerchantUpdateDeliveryStatusResource
+)
+from .resources.customer_purchase import (
+    CustomerPurchaseResource,
+    CustomerGetOrdersResource
+)
+# routes.py - Add these imports
+from .resources.customer_product import (
+    CustomerGetProductsResource,
+    CustomerGetProductDetailsResource,
+    CustomerGetProductCategoriesResource
+)
+from .resources.customer_payments import (
+    CustomerGetPaymentsResource,
+    CustomerGetPaymentStatsResource,
+    CustomerDownloadReceiptResource
+)
+# Add to routes.py
+
+# routes.py - Add these imports
+
+from .resources.customer_document import (
+    CustomerGetDocumentsResource,
+    CustomerUploadDocumentsResource,
+    CustomerGetKYCStatusResource,
+    AdminVerifyDocumentResource,
+    AdminGetPendingKYCResource
+)
+
+# routes.py - Add these imports and routes
+
+from .resources.merchant_document import (
+    MerchantGetDocumentsResource,
+    MerchantUploadDocumentsResource,
+    MerchantGetKYCStatusResource,
+    MerchantGetBankDetailsResource,
+    MerchantUpdateBankDetailsResource,
+    AdminGetPendingMerchantKYCResource,
+    AdminVerifyMerchantDocumentResource,
+    AdminVerifyMerchantCompleteResource
+)
+
+from .resources.notification import (
+    GetNotificationsResource,
+    MarkNotificationReadResource,
+    MarkAllNotificationsReadResource,
+    DeleteNotificationResource,
+    ClearAllNotificationsResource,
+    GetUnreadCountResource
+)
+
+
+# In register_routes function, add:
+
+# ============================================
+# MERCHANT DOCUMENT ROUTES
+# ============================================
+
+# Add to register_routes function:
+
+# ============================================
+# CUSTOMER DOCUMENT ROUTES
+# ============================================
+
+# Add to register_routes function:
+
+# Add to register_routes function:
+# ============================================
+# CUSTOMER PRODUCT ROUTES
+# ============================================
 
 
 def register_routes(app):
@@ -133,7 +308,6 @@ def register_routes(app):
     api.add_resource(VerifyMerchantResource, "/admin/merchants/verify/<int:merchant_id>")
     api.add_resource(MerchantStatsResource, "/admin/merchants/stats")
     
-    # Merchant specialized endpoints
     api.add_resource(MerchantKYCResource, "/admin/merchants/<int:merchant_id>/kyc")
     api.add_resource(MerchantCommissionResource, "/admin/merchants/<int:merchant_id>/commission")
     api.add_resource(MerchantSettlementResource, "/admin/merchants/<int:merchant_id>/settlement")
@@ -147,6 +321,13 @@ def register_routes(app):
     api.add_resource(DeleteDocumentResource, "/admin/documents/<int:document_id>")
 
     # ============================================
+    # ADMIN - SYSTEM SETTINGS ROUTES
+    # ============================================
+    api.add_resource(SystemSettingsResource, "/admin/settings/charges")
+    api.add_resource(InstallmentCalculatorResource, "/installment/calculate")
+    api.add_resource(LateFeeCalculatorResource, "/installment/late-fee")
+
+    # ============================================
     # TRANSACTION ROUTES
     # ============================================
     api.add_resource(GetTransactionsResource, "/transactions")
@@ -155,36 +336,21 @@ def register_routes(app):
     api.add_resource(GetTransactionStatsResource, "/transactions/stats")
     api.add_resource(DeleteTransactionResource, "/transactions/<int:transaction_id>")
 
-
-    #===========================================
+    # ============================================
     # CURRENT USER ROUTE
-    #===========================================
+    # ============================================
     api.add_resource(GetCurrentUserResource, "/admin/get_current_user")
-    # ============================================
-    # PROTECTED ROUTES
-    # ============================================
-
-    # Add to imports
-
-    
-
-# Add to register_routes function:
 
     # ============================================
-    # INSTALMENT PLAN ROUTES
+    # MERCHANT DASHBOARD ROUTES
     # ============================================
-    api.add_resource(GetMerchantInstalmentsResource, "/merchant/instalments")
-    api.add_resource(CreateInstalmentPlanResource, "/merchant/instalments/create")
-    api.add_resource(UpdateInstalmentPlanResource, "/merchant/instalments/<int:plan_id>")
-    api.add_resource(DeleteInstalmentPlanResource, "/merchant/instalments/<int:plan_id>")
-    api.add_resource(GetInstalmentPlanDetailsResource, "/merchant/instalments/<int:plan_id>/details")
-    api.add_resource(RecordInstalmentPaymentResource, "/merchant/instalments/<int:plan_id>/pay")
-
-    api.add_resource(ProtectedResource, "/protected")
-
-    # Add to imports
-
-# Add to register_routes function:
+    api.add_resource(MerchantDashboardStatsResource, "/merchant/dashboard/stats")
+    api.add_resource(MerchantSalesChartResource, "/merchant/dashboard/sales-chart")
+    api.add_resource(MerchantRecentTransactionsResource, "/merchant/transactions/recent")
+    api.add_resource(MerchantInstalmentsOverviewResource, "/merchant/instalments/overview")
+    api.add_resource(MerchantSettlementInfoResource, "/merchant/settlements/info")
+    api.add_resource(MerchantAccountStatusResource, "/merchant/account/status")
+    api.add_resource(MerchantQuickActionsResource, "/merchant/quick-actions")
 
     # ============================================
     # MERCHANT TRANSACTION ROUTES
@@ -196,11 +362,6 @@ def register_routes(app):
     api.add_resource(MerchantRefundTransactionResource, "/merchant/transactions/<int:transaction_id>/refund")
     api.add_resource(MerchantExportTransactionsResource, "/merchant/transactions/export")
 
-    # Add to imports
-
-
-# Add to register_routes function:
-
     # ============================================
     # MERCHANT CUSTOMER ROUTES
     # ============================================
@@ -210,12 +371,6 @@ def register_routes(app):
     api.add_resource(MerchantGetCustomerStatsResource, "/merchant/customers/stats")
     api.add_resource(MerchantExportCustomersResource, "/merchant/customers/export")
 
-
-    
-
-
-# Add to register_routes function:
-
     # ============================================
     # MERCHANT SETTLEMENT ROUTES
     # ============================================
@@ -224,10 +379,6 @@ def register_routes(app):
     api.add_resource(MerchantRequestPayoutResource, "/merchant/settlements/request-payout")
     api.add_resource(MerchantUpdateSettlementSettingsResource, "/merchant/settlements/settings")
     api.add_resource(MerchantGetSettlementDetailsResource, "/merchant/settlements/<string:settlement_id>")
-
-    
-
-# Add to register_routes function:
 
     # ============================================
     # MERCHANT DISPUTE ROUTES
@@ -240,9 +391,15 @@ def register_routes(app):
     api.add_resource(MerchantRejectDisputeResource, "/merchant/disputes/<int:dispute_id>/reject")
     api.add_resource(MerchantEscalateDisputeResource, "/merchant/disputes/<int:dispute_id>/escalate")
 
-    # Add to imports
-
-# Add to register_routes function:
+    # ============================================
+    # MERCHANT REPORT ROUTES
+    # ============================================
+    api.add_resource(MerchantSalesReportResource, "/merchant/reports/sales")
+    api.add_resource(MerchantTransactionReportResource, "/merchant/reports/transactions")
+    api.add_resource(MerchantCustomerReportResource, "/merchant/reports/customers")
+    api.add_resource(MerchantFinancialReportResource, "/merchant/reports/financial")
+    api.add_resource(MerchantInstalmentReportResource, "/merchant/reports/instalments")
+    api.add_resource(MerchantExportReportResource, "/merchant/reports/export")
 
     # ============================================
     # MERCHANT SETTINGS ROUTES
@@ -258,3 +415,162 @@ def register_routes(app):
     api.add_resource(MerchantUpdateKYCResource, "/merchant/settings/kyc")
     api.add_resource(MerchantUploadDocumentResource, "/merchant/settings/upload-document")
     api.add_resource(MerchantGetActivityLogResource, "/merchant/settings/activity-log")
+
+    # ============================================
+    # CUSTOMER DASHBOARD ROUTES
+    # ============================================
+    api.add_resource(CustomerDashboardStatsResource, "/customer/dashboard/stats")
+    api.add_resource(CustomerPaymentOverviewResource, "/customer/payment-overview")
+    api.add_resource(CustomerUpcomingPaymentsResource, "/customer/upcoming-payments")
+    api.add_resource(CustomerRecentTransactionsResource, "/customer/recent-transactions")
+    api.add_resource(CustomerInstalmentsResource, "/customer/instalments")
+    api.add_resource(CustomerPlanDetailsResource, "/customer/instalments/<int:plan_id>")
+    api.add_resource(CustomerMakePaymentResource, "/customer/payments/make")
+
+    # ============================================
+    # CUSTOMER PROFILE ROUTES
+    # ============================================
+    api.add_resource(CustomerGetProfileResource, "/customer/profile")
+    api.add_resource(CustomerUpdateProfileResource, "/customer/profile")
+    api.add_resource(CustomerUpdatePasswordResource, "/customer/password")
+    api.add_resource(CustomerGetKYCStatusResource, "/customer/kyc/status")
+    api.add_resource(CustomerUploadKYCResource, "/customer/kyc/upload")
+    api.add_resource(CustomerGetActivityLogResource, "/customer/settings/activity-log")
+
+    # ============================================
+    # CUSTOMER NOTIFICATION ROUTES
+    # ============================================
+    api.add_resource(CustomerGetNotificationsResource, "/customer/notifications")
+    api.add_resource(CustomerMarkNotificationReadResource, "/customer/notifications/<string:notification_id>/read")
+    api.add_resource(CustomerMarkAllNotificationsReadResource, "/customer/notifications/mark-all-read")
+    api.add_resource(CustomerGetNotificationSettingsResource, "/customer/notifications/settings")
+    api.add_resource(CustomerUpdateNotificationSettingsResource, "/customer/notifications/settings")
+    api.add_resource(CustomerUnreadNotificationCountResource, "/customer/notifications/unread-count")
+
+    # ============================================
+    # CUSTOMER PAYMENT ROUTES
+    # ============================================
+    api.add_resource(CustomerPaymentReminderResource, "/customer/payments/reminder")
+
+    # ============================================
+    # CUSTOMER TRANSACTION ROUTES
+    # ============================================
+    api.add_resource(CustomerGetTransactionsResource, "/customer/transactions")
+    api.add_resource(CustomerGetTransactionDetailsResource, "/customer/transactions/<int:transaction_id>")
+    api.add_resource(CustomerGetTransactionStatsResource, "/customer/transactions/stats")
+    api.add_resource(CustomerExportTransactionsResource, "/customer/transactions/export")
+
+    # ============================================
+    # CUSTOMER SUPPORT ROUTES
+    # ============================================
+    api.add_resource(CustomerCreateTicketResource, "/customer/support/ticket")
+    api.add_resource(CustomerGetTicketsResource, "/customer/support/tickets")
+    api.add_resource(CustomerGetTicketDetailsResource, "/customer/support/tickets/<int:ticket_id>")
+    api.add_resource(CustomerAddTicketMessageResource, "/customer/support/tickets/<int:ticket_id>/reply")
+    api.add_resource(CustomerCloseTicketResource, "/customer/support/tickets/<int:ticket_id>/close")
+
+    # ============================================
+    # PROTECTED ROUTES
+    # ============================================
+
+    # Add to imports in routes.py
+
+# Add to register_routes function:
+    # api.add_resource(SystemSettingsResource, "/admin/settings/charges")
+    api.add_resource(InstallmentOptionsResource, "/admin/settings/installments")  # Add this
+    # api.add_resource(InstallmentCalculatorResource, "/installment/calculate")
+    # api.add_resource(LateFeeCalculatorResource, "/installment/late-fee")
+
+    # resources/__init__.py - Add product routes
+
+
+
+# Add to register_routes function:
+    api.add_resource(MerchantProductsResource, "/merchant/products")
+    api.add_resource(MerchantProductDetailResource, "/merchant/products/<int:product_id>")
+    api.add_resource(ProtectedResource, "/protected")
+
+    # Add to routes.py imports
+
+
+# Add to register_routes function:
+# ============================================
+# ADMIN ORDER ROUTES
+# ============================================
+    api.add_resource(AdminGetOrdersResource, "/admin/orders")
+    api.add_resource(AdminApproveOrderResource, "/admin/orders/<int:order_id>/approve")
+    api.add_resource(AdminRejectOrderResource, "/admin/orders/<int:order_id>/reject")
+
+    # ============================================
+    # MERCHANT ORDER ROUTES
+    # ============================================
+    api.add_resource(MerchantGetOrdersResource, "/merchant/orders")
+    api.add_resource(MerchantUpdateDeliveryStatusResource, "/merchant/orders/<int:order_id>/delivery")
+
+    # ============================================
+    # CUSTOMER PURCHASE ROUTES
+    # ============================================
+    api.add_resource(CustomerPurchaseResource, "/customer/purchase")
+    api.add_resource(CustomerGetOrdersResource, "/customer/orders")
+
+
+
+
+    api.add_resource(CustomerGetProductsResource, "/customer/products")
+    api.add_resource(CustomerGetProductDetailsResource, "/customer/products/<int:product_id>")
+    api.add_resource(CustomerGetProductCategoriesResource, "/customer/products/categories")
+
+
+    # Add to routes.py imports
+
+
+# Add to register_routes function:
+# ============================================
+# CUSTOMER PAYMENTS ROUTES
+# ============================================
+    api.add_resource(CustomerGetPaymentsResource, "/customer/payments")
+    api.add_resource(CustomerGetPaymentStatsResource, "/customer/payments/stats")
+    api.add_resource(CustomerDownloadReceiptResource, "/customer/payments/<int:payment_id>/receipt")
+    # api.add_resource(CustomerInstalmentsResource, "/customer/instalments")
+    # In register_routes function, add:
+
+# ============================================
+# CUSTOMER PAYMENT ROUTES
+# ============================================
+    api.add_resource(CustomerPaidPaymentsResource, "/customer/paid-payments")
+
+    api.add_resource(CustomerGetDocumentsResource, "/customer/documents")
+    api.add_resource(CustomerUploadDocumentsResource, "/customer/documents/upload")
+    # api.add_resource(CustomerGetKYCStatusResource, "/customer/kyc/status")
+
+# ============================================
+# ADMIN DOCUMENT VERIFICATION ROUTES
+# ============================================
+    api.add_resource(AdminGetPendingKYCResource, "/admin/kyc/pending")
+    api.add_resource(AdminVerifyDocumentResource, "/admin/documents/<int:document_id>/verify")
+    api.add_resource(MerchantGetDocumentsResource, "/merchant/documents")
+    api.add_resource(MerchantUploadDocumentsResource, "/merchant/documents/upload")
+    api.add_resource(MerchantGetKYCStatusResource, "/merchant/kyc/status")
+    api.add_resource(MerchantGetBankDetailsResource, "/merchant/bank-details")
+    api.add_resource(MerchantUpdateBankDetailsResource, "/merchant/bank-details")
+
+    # ============================================
+    # ADMIN MERCHANT VERIFICATION ROUTES
+    # ============================================
+    api.add_resource(AdminGetPendingMerchantKYCResource, "/admin/merchant/kyc/pending")
+    api.add_resource(AdminVerifyMerchantDocumentResource, "/admin/merchant/documents/<int:document_id>/verify")
+    api.add_resource(AdminVerifyMerchantCompleteResource, "/admin/merchant/<int:merchant_id>/verify")
+    # routes.py - Add notification routes
+
+
+# In register_routes function, add:
+
+# ============================================
+# NOTIFICATION ROUTES
+# ============================================
+    api.add_resource(GetNotificationsResource, "/notifications")
+    api.add_resource(MarkNotificationReadResource, "/notifications/<int:notification_id>/read")
+    api.add_resource(MarkAllNotificationsReadResource, "/notifications/mark-all-read")
+    api.add_resource(DeleteNotificationResource, "/notifications/<int:notification_id>")
+    api.add_resource(ClearAllNotificationsResource, "/notifications/clear-all")
+    api.add_resource(GetUnreadCountResource, "/notifications/unread-count")

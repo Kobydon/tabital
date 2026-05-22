@@ -156,9 +156,9 @@ class MerchantInstalmentsOverviewResource(Resource):
             return {"error": "Unauthorized"}, 403
         
         instalments = Transaction.query.filter(
-            Transaction.merchant_id == current_merchant.id,
-            Transaction.payment_plan.isnot(None),
-            Transaction.payment_plan != 'Standard'
+            Transaction.merchant_id == current_merchant.id
+            # Transaction.payment_plan.isnot(None),
+            # Transaction.payment_plan != 'Standard'
         ).all()
         
         today = datetime.now()

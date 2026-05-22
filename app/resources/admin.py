@@ -1,8 +1,12 @@
+from flask import json
 from flask_restful import Resource, request
 from flask_praetorian import auth_required, current_user
+from sqlalchemy import Transaction
+
+from app.models.purchase_order import PurchaseOrder
 from ..models.user import User
 from ..extensions import db
-from datetime import datetime
+from datetime import datetime, timedelta
 
 def safe_str(v): return v if v is not None else ""
 def safe_int(v): return v if v is not None else 0
@@ -35,7 +39,7 @@ class ApproveUserResource(Resource):
         if not user:
             return {"error": "User not found"}, 404
         user.status = "approved"
-        if user.role == "customer" and not user.customer_id:
+        if user.role == "customer" and not user.customer_i:
             user.customer_id = user.generate_customer_id()
         elif user.role == "merchant" and not user.merchant_id:
             user.merchant_id = user.generate_merchant_id()
@@ -483,3 +487,264 @@ class GetCurrentUserResource(Resource):
 
             "created_at": user.created_at.isoformat() if user.created_at else ""
         }
+    
+
+
+# resources/admin_orders.py - Updated approve method
+# resources/admin_orders.py - Add missing imports at the top
+
+from flask_restful import Resource, request
+from flask_praetorian import auth_required, current_user
+from ..models.purchase_order import PurchaseOrder
+from ..models.transaction import Transaction
+from ..models.instalment import InstalmentPlan
+from ..models.instalment_payment import InstalmentPayment
+from ..extensions import db
+from datetime import datetime, timedelta
+import json
+
+def safe_str(v): return v if v is not None else ""
+
+# resources/admin_orders.py
+from flask_restful import Resource, request
+from flask_praetorian import auth_required, current_user
+from ..models.purchase_order import PurchaseOrder
+from ..models.transaction import Transaction
+from ..models.instalment import InstalmentPlan
+from ..models.instalment_payment import InstalmentPayment
+from ..extensions import db
+from datetime import datetime, timedelta
+import json
+
+def safe_str(v): return v if v is not None else ""
+# resources/admin_orders.py
+from flask_restful import Resource, request
+from flask_praetorian import auth_required, current_user
+from ..models.purchase_order import PurchaseOrder
+from ..models.transaction import Transaction
+from ..models.instalment import InstalmentPlan
+from ..models.instalment_payment import InstalmentPayment
+from ..extensions import db
+from datetime import datetime, timedelta
+import json
+import logging
+
+# Set up logging
+logging.basicConfig(level=logging.DEBUG)
+
+
+class AdminApproveOrderResource(Resource):
+    @auth_required
+    def put(self, order_id):
+        """Admin approves an order and creates instalment plan with payment schedule"""
+        current_admin = current_user()
+        
+        if current_admin.role != 'admin':
+            return {"error": "Unauthorized"}, 403
+        
+        order = PurchaseOrder.query.get(order_id)
+        if not order:
+            return {"error": "Order not found"}, 404
+        
+        if order.status != 'pending':
+            return {"error": f"Order already {order.status}"}, 400
+        
+        data = request.get_json()
+        
+        # Update order status
+        order.status = 'approved'
+        order.approved_at = datetime.now()
+        order.admin_notes = data.get('admin_notes', '')
+        db.session.commit()
+        
+        print(f"Order {order.order_id} approved")
+        
+        # Calculate dates
+        start_date = datetime.now()
+        end_date = start_date
+        if order.number_of_installments > 1:
+            end_date = start_date + timedelta(days=30 * (order.number_of_installments - 1))
+        
+        # Calculate remaining balance
+        remaining_balance = order.total_payable - order.down_payment_amount
+        
+        print(f"Creating instalment plan for customer {order.customer_id}, product {order.product_name}")
+        print(f"Total: {order.total_payable}, Down: {order.down_payment_amount}, Remaining: {remaining_balance}")
+        print(f"Installments: {order.number_of_installments}, Amount per installment: {order.installment_amount}")
+        
+        # Generate plan ID
+        plan_id = None
+        try:
+            plan_id = InstalmentPlan.generate_plan_id(InstalmentPlan)
+            print(f"Generated plan_id: {plan_id}")
+        except Exception as e:
+            print(f"Error generating plan_id: {e}")
+            # Fallback: create a simple plan_id
+            from sqlalchemy import func
+            result = db.session.query(func.max(InstalmentPlan.id)).scalar()
+            plan_id = f"IP{(result + 1) if result else 1:04d}"
+            print(f"Fallback plan_id: {plan_id}")
+        
+        # Create instalment plan
+        try:
+            instalment_plan = InstalmentPlan(
+                plan_id=plan_id,
+                merchant_id=order.merchant_id,
+                customer_id=order.customer_id,
+                transaction_id=None,
+                plan_name=order.product_name,
+                description=order.product_description or "",
+                total_amount=float(order.total_payable),
+                down_payment=float(order.down_payment_amount),
+                remaining_amount=float(remaining_balance),
+                number_of_installments=int(order.number_of_installments),
+                installment_amount=float(order.installment_amount),
+                frequency='monthly',
+                start_date=start_date,
+                end_date=end_date,
+                status='active',
+                payment_status='partial',
+                paid_installments=1,
+                customer_name=order.customer.full_name or order.customer.business_name or "Customer",
+                customer_phone=order.customer.phone or "",
+                customer_email=order.customer.email or ""
+            )
+            db.session.add(instalment_plan)
+            db.session.flush()
+            print(f"Instalment plan created with ID: {instalment_plan.id}, Plan ID: {instalment_plan.plan_id}")
+        except Exception as e:
+            print(f"Error creating instalment plan: {e}")
+            db.session.rollback()
+            return {"error": f"Failed to create instalment plan: {str(e)}"}, 500
+        
+        # Parse payment schedule from order
+        payment_schedule = []
+        if order.payment_schedule:
+            try:
+                if isinstance(order.payment_schedule, str):
+                    payment_schedule = json.loads(order.payment_schedule)
+                else:
+                    payment_schedule = order.payment_schedule
+                print(f"Payment schedule loaded: {len(payment_schedule)} payments")
+            except Exception as e:
+                print(f"Error parsing payment schedule: {e}")
+                payment_schedule = []
+        
+        if not payment_schedule:
+            # Create default payment schedule
+            print("Creating default payment schedule")
+            payment_schedule = []
+            # Down payment
+            payment_schedule.append({
+                "installment_number": 1,
+                "amount": order.down_payment_amount,
+                "due_date": start_date.strftime('%Y-%m-%d'),
+                "status": "due_now",
+                "description": "Down Payment (40% upfront)"
+            })
+            # Remaining installments
+            for i in range(2, order.number_of_installments + 1):
+                due_date = start_date + timedelta(days=30 * (i - 1))
+                payment_schedule.append({
+                    "installment_number": i,
+                    "amount": order.installment_amount,
+                    "due_date": due_date.strftime('%Y-%m-%d'),
+                    "status": "pending",
+                    "description": f"Installment {i} of {order.number_of_installments}"
+                })
+        
+        # Create payment schedule entries
+        payments_created = 0
+        for i, payment in enumerate(payment_schedule):
+            try:
+                installment_number = payment.get('installment_number', i + 1)
+                amount = payment.get('amount', 0)
+                due_date_str = payment.get('due_date')
+                
+                # Parse due date
+                if due_date_str and due_date_str != 'Now':
+                    try:
+                        due_date = datetime.strptime(due_date_str, '%Y-%m-%d')
+                    except:
+                        due_date = start_date + timedelta(days=30 * (installment_number - 1))
+                else:
+                    due_date = start_date if installment_number == 1 else start_date + timedelta(days=30 * (installment_number - 1))
+                
+                # First installment (down payment) is paid, others are pending
+                status = 'paid' if installment_number == 1 else 'pending'
+                paid_date = start_date if installment_number == 1 else None
+                
+                # Generate payment ID
+                payment_id = None
+                try:
+                    payment_id = InstalmentPayment.generate_payment_id(InstalmentPayment)
+                except:
+                    from sqlalchemy import func
+                    result = db.session.query(func.max(InstalmentPayment.id)).scalar()
+                    payment_id = f"PAY{(result + 1) if result else 1:04d}"
+                
+                instalment_payment = InstalmentPayment(
+                    payment_id=payment_id,
+                    plan_id=instalment_plan.id,
+                    installment_number=int(installment_number),
+                    due_date=due_date,
+                    paid_date=paid_date,
+                    amount=float(amount),
+                    paid_amount=float(amount) if status == 'paid' else 0,
+                    status=status,
+                    late_fee=0,
+                    late_fee_paid=False
+                )
+                db.session.add(instalment_payment)
+                payments_created += 1
+                print(f"Created payment {installment_number}: amount {amount}, status {status}")
+            except Exception as e:
+                print(f"Error creating payment {i}: {e}")
+        
+        print(f"Created {payments_created} payment schedule entries")
+        
+        # Create transaction record
+        try:
+            # Generate transaction ID
+            transaction_id = None
+            try:
+                transaction_id = Transaction.generate_transaction_id(Transaction)
+            except:
+                from sqlalchemy import func
+                result = db.session.query(func.max(Transaction.id)).scalar()
+                transaction_id = f"TRX{(result + 1) if result else 1:04d}"
+            
+            transaction = Transaction(
+                transaction_id=transaction_id,
+                customer_id=order.customer_id,
+                merchant_id=order.merchant_id,
+                amount=float(order.total_payable),
+                product_name=order.product_name,
+                product_description=order.product_description or "",
+                quantity=order.quantity or 1,
+                payment_plan=f"{order.number_of_installments} Months",
+                status='completed',
+                payment_status='processing',
+                delivery_address=order.delivery_address or "",
+                transaction_date=datetime.now()
+            )
+            db.session.add(transaction)
+            print(f"Transaction created with ID: {transaction.transaction_id}")
+        except Exception as e:
+            print(f"Error creating transaction: {e}")
+        
+        # Commit all changes
+        try:
+            db.session.commit()
+            print("All changes committed successfully")
+        except Exception as e:
+            print(f"Error committing changes: {e}")
+            db.session.rollback()
+            return {"error": f"Failed to commit: {str(e)}"}, 500
+        
+        return {
+            "message": "Order approved and instalment plan created",
+            "transaction_id": transaction.transaction_id,
+            "plan_id": instalment_plan.plan_id,
+            "payments_created": payments_created
+        }, 200

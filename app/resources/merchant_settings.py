@@ -6,6 +6,7 @@ from ..extensions import db
 from datetime import datetime, timedelta
 import re
 
+from ..models.notification_settings import NotificationSetting
 def safe_str(v): return v if v is not None else ""
 def safe_bool(v): return v if v is not None else False
 def safe_float(v): return v if v is not None else 0.0
@@ -305,3 +306,70 @@ class MerchantGetActivityLogResource(Resource):
                 }
             ]
         }
+    
+
+
+class MerchantGetNotificationSettingsResource(Resource):
+    @auth_required
+    def get(self):
+        """Get notification settings for the merchant"""
+        current_merchant = current_user()
+        
+        if current_merchant.role != "merchant":
+            return {"error": "Unauthorized"}, 403
+        
+        # Get or create notification settings
+        settings = NotificationSetting.query.filter_by(user_id=current_merchant.id).first()
+        
+        if not settings:
+            # Create default settings
+            settings = NotificationSetting(user_id=current_merchant.id)
+            db.session.add(settings)
+            db.session.commit()
+        
+        return {
+            "email_notifications": settings.email_notifications,
+            "sms_notifications": settings.sms_notifications,
+            "push_notifications": settings.push_notifications,
+            "transaction_alerts": settings.transaction_alerts,
+            "settlement_alerts": settings.settlement_alerts,
+            "dispute_alerts": settings.dispute_alerts,
+            "promotional_emails": settings.promotional_emails,
+            "newsletter": settings.newsletter,
+            "daily_summary": settings.daily_summary,
+            "weekly_report": settings.weekly_report
+        }
+
+
+class MerchantUpdateNotificationSettingsResource(Resource):
+    @auth_required
+    def put(self):
+        """Update notification settings for the merchant"""
+        current_merchant = current_user()
+        
+        if current_merchant.role != "merchant":
+            return {"error": "Unauthorized"}, 403
+        
+        data = request.get_json()
+        
+        # Get or create notification settings
+        settings = NotificationSetting.query.filter_by(user_id=current_merchant.id).first()
+        
+        if not settings:
+            settings = NotificationSetting(user_id=current_merchant.id)
+            db.session.add(settings)
+        
+        # Update settings
+        allowed_fields = [
+            'email_notifications', 'sms_notifications', 'push_notifications',
+            'transaction_alerts', 'settlement_alerts', 'dispute_alerts',
+            'promotional_emails', 'newsletter', 'daily_summary', 'weekly_report'
+        ]
+        
+        for field in allowed_fields:
+            if field in data:
+                setattr(settings, field, data[field])
+        
+        db.session.commit()
+        
+        return {"message": "Notification settings updated successfully"}, 200
