@@ -252,6 +252,25 @@ from .resources.notification import (
     GetUnreadCountResource
 )
 
+# routes.py - Add these imports
+
+from .resources.merchant_notifications import (
+    MerchantGetNotificationsResource,
+    MerchantMarkNotificationReadResource,
+    MerchantMarkAllNotificationsReadResource,
+    MerchantGetNotificationSettingsResource,
+    MerchantUpdateNotificationSettingsResource,
+    MerchantUnreadNotificationCountResource,
+    MerchantDeleteNotificationResource,
+    MerchantClearAllNotificationsResource
+)
+
+# In register_routes function, add:
+
+# ============================================
+# MERCHANT NOTIFICATION ROUTES
+# ============================================
+
 
 # In register_routes function, add:
 
@@ -574,3 +593,14 @@ def register_routes(app):
     api.add_resource(DeleteNotificationResource, "/notifications/<int:notification_id>")
     api.add_resource(ClearAllNotificationsResource, "/notifications/clear-all")
     api.add_resource(GetUnreadCountResource, "/notifications/unread-count")
+
+
+    # api.add_resource(MerchantGetNotificationsResource, "/merchant/notifications")
+    api.add_resource(MerchantMarkNotificationReadResource, "/merchant/notifications/<string:notification_id>/read")
+    api.add_resource(MerchantMarkAllNotificationsReadResource, "/merchant/notifications/mark-all-read")
+    # api.add_resource(MerchantGetNotificationSettingsResource, "/merchant/notifications/settings")
+    # api.add_resource(MerchantUpdateNotificationSettingsResource, "/merchant/notifications/settings")
+    api.add_resource(MerchantUnreadNotificationCountResource, "/merchant/notifications/unread-count")
+    api.add_resource(MerchantDeleteNotificationResource, "/merchant/notifications/<string:notification_id>")
+    api.add_resource(MerchantClearAllNotificationsResource, "/merchant/notifications/clear-all")
+
