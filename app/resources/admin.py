@@ -532,7 +532,6 @@ import logging
 # Set up logging
 logging.basicConfig(level=logging.DEBUG)
 
-
 class AdminApproveOrderResource(Resource):
     @auth_required
     def put(self, order_id):
@@ -567,6 +566,17 @@ class AdminApproveOrderResource(Resource):
         
         # Calculate remaining balance
         remaining_balance = order.total_payable - order.down_payment_amount
+        
+        # ============================================
+        # CALCULATE PAYOUT AMOUNT (10% commission deducted)
+        # ============================================
+        commission_rate = 10  # 10% commission
+        payout_amount = float(order.total_payable) * (1 - (commission_rate / 100))
+        commission_amount = float(order.total_payable) * (commission_rate / 100)
+        
+        print(f"Order Total: GHS {order.total_payable}")
+        print(f"Commission ({commission_rate}%): GHS {commission_amount}")
+        print(f"Merchant Payout: GHS {payout_amount}")
         
         print(f"Creating instalment plan for customer {order.customer_id}, product {order.product_name}")
         print(f"Total: {order.total_payable}, Down: {order.down_payment_amount}, Remaining: {remaining_balance}")
@@ -607,7 +617,11 @@ class AdminApproveOrderResource(Resource):
                 paid_installments=1,
                 customer_name=order.customer.full_name or order.customer.business_name or "Customer",
                 customer_phone=order.customer.phone or "",
-                customer_email=order.customer.email or ""
+                customer_email=order.customer.email or "",
+                # Store payout information
+                commission_rate=commission_rate,
+                commission_amount=commission_amount,
+                payout_amount=payout_amount
             )
             db.session.add(instalment_plan)
             db.session.flush()
@@ -726,10 +740,16 @@ class AdminApproveOrderResource(Resource):
                 status='completed',
                 payment_status='processing',
                 delivery_address=order.delivery_address or "",
-                transaction_date=datetime.now()
+                transaction_date=datetime.now(),
+                commission_rate=commission_rate,
+                commission_amount=commission_amount,
+                payout_amount=payout_amount
             )
             db.session.add(transaction)
             print(f"Transaction created with ID: {transaction.transaction_id}")
+            print(f"  - Total: GHS {order.total_payable}")
+            print(f"  - Commission ({commission_rate}%): GHS {commission_amount}")
+            print(f"  - Merchant Payout: GHS {payout_amount}")
         except Exception as e:
             print(f"Error creating transaction: {e}")
         
@@ -746,5 +766,10 @@ class AdminApproveOrderResource(Resource):
             "message": "Order approved and instalment plan created",
             "transaction_id": transaction.transaction_id,
             "plan_id": instalment_plan.plan_id,
-            "payments_created": payments_created
+            "payments_created": payments_created,
+            "order_total": float(order.total_payable),
+            "commission_rate": commission_rate,
+            "commission_amount": commission_amount,
+            "payout_amount": payout_amount,
+            "currency": "GHS"
         }, 200

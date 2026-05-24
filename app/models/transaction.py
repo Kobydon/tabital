@@ -12,6 +12,7 @@ class Transaction(db.Model):
     merchant_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
     
     amount = db.Column(db.Float, nullable=False)
+    payout_amount = db.Column(db.Float)
     product_name = db.Column(db.String(200), nullable=False)
     product_description = db.Column(db.Text)
     quantity = db.Column(db.Integer, default=1)

@@ -3,7 +3,8 @@ from flask_praetorian import auth_required, current_user
 from ..models.user import User
 from ..models.transaction import Transaction
 from ..extensions import db
-from datetime import datetime
+from datetime import datetime, timedelta
+from sqlalchemy import func, or_
 
 def safe_str(value):
     return value if value is not None else ""
@@ -88,6 +89,11 @@ class GetTransactionsResource(Resource):
                 "tracking_number": safe_str(t.tracking_number),
                 "notes": safe_str(t.notes),
                 "created_at": t.created_at.isoformat() if t.created_at else "",
+                # Payout information
+                "commission_rate": safe_float(getattr(t, 'commission_rate', 10)),
+                "commission_amount": safe_float(getattr(t, 'commission_amount', 0)),
+                "payout_amount": safe_float(getattr(t, 'payout_amount', 0)),
+                "is_instalment": getattr(t, 'payment_plan', None) is not None
             } for t in transactions
         ]
 
@@ -114,6 +120,11 @@ class CreateTransactionResource(Resource):
         if not merchant or merchant.role != 'merchant':
             return {"error": "Merchant not found"}, 404
         
+        # Calculate payout amounts (10% commission)
+        commission_rate = 10
+        commission_amount = data['amount'] * (commission_rate / 100)
+        payout_amount = data['amount'] - commission_amount
+        
         # Create transaction
         transaction = Transaction(
             customer_id=current_user_obj.id,
@@ -128,7 +139,10 @@ class CreateTransactionResource(Resource):
             notes=data.get('notes', ''),
             status='pending',
             payment_status='pending',
-            delivery_status='pending'
+            delivery_status='pending',
+            commission_rate=commission_rate,
+            commission_amount=commission_amount,
+            payout_amount=payout_amount
         )
         
         transaction.transaction_id = transaction.generate_transaction_id()
@@ -139,7 +153,11 @@ class CreateTransactionResource(Resource):
         return {
             "message": "Transaction created successfully",
             "transaction_id": transaction.transaction_id,
-            "id": transaction.id
+            "id": transaction.id,
+            "amount": transaction.amount,
+            "commission_rate": commission_rate,
+            "commission_amount": commission_amount,
+            "payout_amount": payout_amount
         }, 201
 
 
@@ -175,7 +193,14 @@ class UpdateTransactionStatusResource(Resource):
         
         db.session.commit()
         
-        return {"message": "Transaction updated successfully"}, 200
+        return {
+            "message": "Transaction updated successfully",
+            "transaction_id": transaction.transaction_id,
+            "amount": transaction.amount,
+            "commission_rate": getattr(transaction, 'commission_rate', 10),
+            "commission_amount": getattr(transaction, 'commission_amount', 0),
+            "payout_amount": getattr(transaction, 'payout_amount', 0)
+        }, 200
 
 
 class GetTransactionStatsResource(Resource):
@@ -197,23 +222,28 @@ class GetTransactionStatsResource(Resource):
         # Calculate statistics
         total_transactions = query.count()
         total_amount = db.session.query(db.func.sum(Transaction.amount)).filter(Transaction.id.in_([t.id for t in query.all()])).scalar() or 0
+        total_payout = db.session.query(db.func.sum(Transaction.payout_amount)).filter(Transaction.id.in_([t.id for t in query.all()])).scalar() or 0
+        total_commission = db.session.query(db.func.sum(Transaction.commission_amount)).filter(Transaction.id.in_([t.id for t in query.all()])).scalar() or 0
         
         pending = query.filter_by(status='pending').count()
         completed = query.filter_by(status='completed').count()
         cancelled = query.filter_by(status='cancelled').count()
         
         # Monthly breakdown
-        from sqlalchemy import func, extract
+        from sqlalchemy import extract
         monthly_stats = db.session.query(
             extract('year', Transaction.transaction_date).label('year'),
             extract('month', Transaction.transaction_date).label('month'),
             db.func.count(Transaction.id).label('count'),
-            db.func.sum(Transaction.amount).label('amount')
+            db.func.sum(Transaction.amount).label('amount'),
+            db.func.sum(Transaction.payout_amount).label('payout')
         ).filter(Transaction.id.in_([t.id for t in query.all()])).group_by('year', 'month').order_by('year', 'month').limit(6).all()
         
         return {
             "total_transactions": total_transactions,
             "total_amount": float(total_amount),
+            "total_payout": float(total_payout),
+            "total_commission": float(total_commission),
             "pending": pending,
             "completed": completed,
             "cancelled": cancelled,
@@ -221,7 +251,8 @@ class GetTransactionStatsResource(Resource):
                 {
                     "month": f"{int(m[1])}/{int(m[0])}",
                     "count": m[2],
-                    "amount": float(m[3])
+                    "amount": float(m[3]),
+                    "payout": float(m[4]) if m[4] else 0
                 } for m in monthly_stats
             ]
         }, 200
@@ -244,22 +275,7 @@ class DeleteTransactionResource(Resource):
         db.session.commit()
         
         return {"message": "Transaction deleted successfully"}, 200
-    
 
-
-
-
-from flask_restful import Resource, request
-from flask_praetorian import auth_required, current_user
-from ..models.user import User
-from ..models.transaction import Transaction
-from ..extensions import db
-from datetime import datetime, timedelta
-from sqlalchemy import func, or_
-
-def safe_str(v): return v if v is not None else ""
-def safe_float(v): return v if v is not None else 0.0
-def safe_int(v): return v if v is not None else 0
 
 class MerchantGetTransactionsResource(Resource):
     @auth_required
@@ -315,6 +331,10 @@ class MerchantGetTransactionsResource(Resource):
         total = query.count()
         transactions = query.order_by(Transaction.created_at.desc()).offset((page - 1) * limit).limit(limit).all()
         
+        # Calculate total payout for filtered transactions
+        total_payout = sum(getattr(t, 'payout_amount', 0) or 0 for t in transactions)
+        total_commission = sum(getattr(t, 'commission_amount', 0) or 0 for t in transactions)
+        
         return {
             "transactions": [{
                 "id": t.id,
@@ -335,19 +355,25 @@ class MerchantGetTransactionsResource(Resource):
                 "completion_date": t.completion_date.isoformat() if t.completion_date else "",
                 "delivery_status": safe_str(t.delivery_status),
                 "created_at": t.created_at.isoformat() if t.created_at else "",
-                "is_instalment": t.payment_plan is not None and t.payment_plan != ''
+                "is_instalment": t.payment_plan is not None and t.payment_plan != '',
+                # Payout information for merchants
+                "commission_rate": safe_float(getattr(t, 'commission_rate', 10)),
+                "commission_amount": safe_float(getattr(t, 'commission_amount', 0)),
+                "payout_amount": safe_float(getattr(t, 'payout_amount', 0))
             } for t in transactions],
             "total": total,
             "page": page,
             "limit": limit,
-            "total_pages": (total + limit - 1) // limit
+            "total_pages": (total + limit - 1) // limit,
+            "total_payout": float(total_payout),
+            "total_commission": float(total_commission)
         }
 
 
 class MerchantGetTransactionStatsResource(Resource):
     @auth_required
     def get(self):
-        """Get transaction statistics for the merchant"""
+        """Get transaction statistics for the merchant including payout info"""
         current_merchant = current_user()
         
         if current_merchant.role != "merchant":
@@ -376,6 +402,11 @@ class MerchantGetTransactionStatsResource(Resource):
             Transaction.transaction_date >= month_ago
         ).all()
         
+        # Calculate total payout amounts
+        today_payout = sum(getattr(t, 'payout_amount', 0) or 0 for t in today_transactions)
+        week_payout = sum(getattr(t, 'payout_amount', 0) or 0 for t in week_transactions)
+        month_payout = sum(getattr(t, 'payout_amount', 0) or 0 for t in month_transactions)
+        
         # Status breakdown
         status_breakdown = {}
         statuses = ['pending', 'completed', 'cancelled', 'disputed', 'refunded']
@@ -384,41 +415,56 @@ class MerchantGetTransactionStatsResource(Resource):
                 merchant_id=current_merchant.id,
                 status=status
             ).count()
-            status_breakdown[status] = count
+            # Get payout sum for this status
+            status_transactions = Transaction.query.filter_by(
+                merchant_id=current_merchant.id,
+                status=status
+            ).all()
+            payout_sum = sum(getattr(t, 'payout_amount', 0) or 0 for t in status_transactions)
+            status_breakdown[status] = {
+                "count": count,
+                "payout": float(payout_sum)
+            }
         
-        # Payment method breakdown
+        # Payment method breakdown with payout info
         payment_methods = {}
         methods = Transaction.query.with_entities(
             Transaction.payment_method, 
             func.count(Transaction.id).label('count'),
-            func.sum(Transaction.amount).label('total')
+            func.sum(Transaction.amount).label('total'),
+            func.sum(Transaction.payout_amount).label('payout')
         ).filter_by(merchant_id=current_merchant.id).group_by(Transaction.payment_method).all()
         
         for method in methods:
             if method[0]:
                 payment_methods[method[0]] = {
                     "count": method[1],
-                    "total": safe_float(method[2])
+                    "total": safe_float(method[2]),
+                    "payout": safe_float(method[3] or 0)
                 }
         
         return {
             "today": {
                 "count": len(today_transactions),
                 "total": safe_float(sum(t.amount for t in today_transactions)),
+                "payout": float(today_payout),
                 "completed": len([t for t in today_transactions if t.status == 'completed'])
             },
             "this_week": {
                 "count": len(week_transactions),
                 "total": safe_float(sum(t.amount for t in week_transactions)),
+                "payout": float(week_payout),
                 "completed": len([t for t in week_transactions if t.status == 'completed'])
             },
             "this_month": {
                 "count": len(month_transactions),
                 "total": safe_float(sum(t.amount for t in month_transactions)),
+                "payout": float(month_payout),
                 "completed": len([t for t in month_transactions if t.status == 'completed'])
             },
             "status_breakdown": status_breakdown,
-            "payment_methods": payment_methods
+            "payment_methods": payment_methods,
+            "default_commission_rate": 10
         }
 
 
@@ -449,7 +495,14 @@ class MerchantUpdateTransactionStatusResource(Resource):
         
         db.session.commit()
         
-        return {"message": "Transaction updated successfully"}, 200
+        return {
+            "message": "Transaction updated successfully",
+            "transaction_id": transaction.transaction_id,
+            "amount": transaction.amount,
+            "commission_rate": getattr(transaction, 'commission_rate', 10),
+            "commission_amount": getattr(transaction, 'commission_amount', 0),
+            "payout_amount": getattr(transaction, 'payout_amount', 0)
+        }, 200
 
 
 class MerchantUpdateTransactionResource(Resource):
@@ -476,7 +529,11 @@ class MerchantUpdateTransactionResource(Resource):
         
         db.session.commit()
         
-        return {"message": "Transaction updated successfully"}, 200
+        return {
+            "message": "Transaction updated successfully",
+            "transaction_id": transaction.transaction_id,
+            "payout_amount": getattr(transaction, 'payout_amount', 0)
+        }, 200
 
 
 class MerchantRefundTransactionResource(Resource):
@@ -500,19 +557,27 @@ class MerchantRefundTransactionResource(Resource):
         refund_amount = data.get('refund_amount', transaction.amount)
         reason = data.get('reason', '')
         
+        # Calculate refund impact on payout
+        refund_payout_impact = refund_amount * (1 - (getattr(transaction, 'commission_rate', 10) / 100))
+        
         transaction.status = 'refunded'
         transaction.payment_status = 'refunded'
         transaction.notes = f"Refunded: {reason}" if reason else transaction.notes
         
         db.session.commit()
         
-        return {"message": f"Refund of {refund_amount} processed successfully"}, 200
+        return {
+            "message": f"Refund of {refund_amount} processed successfully",
+            "refund_amount": refund_amount,
+            "refund_payout_impact": refund_payout_impact,
+            "transaction_id": transaction.transaction_id
+        }, 200
 
 
 class MerchantExportTransactionsResource(Resource):
     @auth_required
     def get(self):
-        """Export transactions to CSV"""
+        """Export transactions to CSV with payout info"""
         from flask import Response
         import csv
         from io import StringIO
@@ -537,10 +602,11 @@ class MerchantExportTransactionsResource(Resource):
         output = StringIO()
         writer = csv.writer(output)
         
-        # Write headers
+        # Write headers with payout columns
         writer.writerow([
             'Transaction ID', 'Date', 'Customer Name', 'Customer Phone', 
-            'Product', 'Quantity', 'Amount', 'Status', 'Payment Status',
+            'Product', 'Quantity', 'Amount', 'Commission Rate (%)', 
+            'Commission Amount', 'Payout Amount', 'Status', 'Payment Status',
             'Payment Method', 'Delivery Status'
         ])
         
@@ -554,6 +620,9 @@ class MerchantExportTransactionsResource(Resource):
                 t.product_name,
                 t.quantity,
                 t.amount,
+                getattr(t, 'commission_rate', 10),
+                getattr(t, 'commission_amount', 0),
+                getattr(t, 'payout_amount', 0),
                 t.status,
                 t.payment_status,
                 t.payment_method,
