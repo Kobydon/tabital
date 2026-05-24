@@ -368,8 +368,6 @@ class MerchantGetTransactionsResource(Resource):
             "total_payout": float(total_payout),
             "total_commission": float(total_commission)
         }
-
-
 class MerchantGetTransactionStatsResource(Resource):
     @auth_required
     def get(self):
@@ -384,89 +382,50 @@ class MerchantGetTransactionStatsResource(Resource):
         week_ago = today - timedelta(days=7)
         month_ago = today - timedelta(days=30)
         
-        # Today's stats
-        today_transactions = Transaction.query.filter(
+        # Get all completed transactions for this merchant
+        all_completed_transactions = Transaction.query.filter(
             Transaction.merchant_id == current_merchant.id,
-            Transaction.transaction_date >= today
+            Transaction.status == 'completed'
         ).all()
         
-        # This week's stats
-        week_transactions = Transaction.query.filter(
-            Transaction.merchant_id == current_merchant.id,
-            Transaction.transaction_date >= week_ago
-        ).all()
+        # Calculate total payout (all time)
+        total_payout = sum(getattr(t, 'payout_amount', t.amount * 0.9) for t in all_completed_transactions)
+        total_commission = sum(getattr(t, 'commission_amount', t.amount * 0.1) for t in all_completed_transactions)
         
-        # This month's stats
-        month_transactions = Transaction.query.filter(
-            Transaction.merchant_id == current_merchant.id,
-            Transaction.transaction_date >= month_ago
-        ).all()
+        # Calculate pending payout (completed but not paid)
+        pending_transactions = [t for t in all_completed_transactions if getattr(t, 'payment_status', 'pending') == 'pending']
+        pending_payout = sum(getattr(t, 'payout_amount', t.amount * 0.9) for t in pending_transactions)
         
-        # Calculate total payout amounts
-        today_payout = sum(getattr(t, 'payout_amount', 0) or 0 for t in today_transactions)
-        week_payout = sum(getattr(t, 'payout_amount', 0) or 0 for t in week_transactions)
-        month_payout = sum(getattr(t, 'payout_amount', 0) or 0 for t in month_transactions)
+        # Calculate paid payout
+        paid_transactions = [t for t in all_completed_transactions if getattr(t, 'payment_status', '') == 'paid']
+        paid_payout = sum(getattr(t, 'payout_amount', t.amount * 0.9) for t in paid_transactions)
         
-        # Status breakdown
-        status_breakdown = {}
-        statuses = ['pending', 'completed', 'cancelled', 'disputed', 'refunded']
-        for status in statuses:
-            count = Transaction.query.filter_by(
-                merchant_id=current_merchant.id,
-                status=status
-            ).count()
-            # Get payout sum for this status
-            status_transactions = Transaction.query.filter_by(
-                merchant_id=current_merchant.id,
-                status=status
-            ).all()
-            payout_sum = sum(getattr(t, 'payout_amount', 0) or 0 for t in status_transactions)
-            status_breakdown[status] = {
-                "count": count,
-                "payout": float(payout_sum)
-            }
+        # This month's payout
+        this_month_transactions = [t for t in all_completed_transactions if t.completion_date and t.completion_date >= month_ago]
+        this_month_payout = sum(getattr(t, 'payout_amount', t.amount * 0.9) for t in this_month_transactions)
         
-        # Payment method breakdown with payout info
-        payment_methods = {}
-        methods = Transaction.query.with_entities(
-            Transaction.payment_method, 
-            func.count(Transaction.id).label('count'),
-            func.sum(Transaction.amount).label('total'),
-            func.sum(Transaction.payout_amount).label('payout')
-        ).filter_by(merchant_id=current_merchant.id).group_by(Transaction.payment_method).all()
+        # Last month's payout (for growth calculation)
+        last_month_start = (month_ago - timedelta(days=30)).replace(day=1)
+        last_month_end = month_ago - timedelta(days=1)
+        last_month_transactions = [t for t in all_completed_transactions if t.completion_date and last_month_start <= t.completion_date <= last_month_end]
+        last_month_payout = sum(getattr(t, 'payout_amount', t.amount * 0.9) for t in last_month_transactions)
         
-        for method in methods:
-            if method[0]:
-                payment_methods[method[0]] = {
-                    "count": method[1],
-                    "total": safe_float(method[2]),
-                    "payout": safe_float(method[3] or 0)
-                }
+        # Calculate payout growth
+        if last_month_payout > 0:
+            payout_growth = ((this_month_payout - last_month_payout) / last_month_payout) * 100
+        else:
+            payout_growth = 100 if this_month_payout > 0 else 0
         
+        # Return the format the frontend expects
         return {
-            "today": {
-                "count": len(today_transactions),
-                "total": safe_float(sum(t.amount for t in today_transactions)),
-                "payout": float(today_payout),
-                "completed": len([t for t in today_transactions if t.status == 'completed'])
-            },
-            "this_week": {
-                "count": len(week_transactions),
-                "total": safe_float(sum(t.amount for t in week_transactions)),
-                "payout": float(week_payout),
-                "completed": len([t for t in week_transactions if t.status == 'completed'])
-            },
-            "this_month": {
-                "count": len(month_transactions),
-                "total": safe_float(sum(t.amount for t in month_transactions)),
-                "payout": float(month_payout),
-                "completed": len([t for t in month_transactions if t.status == 'completed'])
-            },
-            "status_breakdown": status_breakdown,
-            "payment_methods": payment_methods,
-            "default_commission_rate": 10
-        }
-
+            "total_payout": float(total_payout),
+            "total_commission": float(total_commission),
+            "pending_payout": float(pending_payout),
+            "paid_payout": float(paid_payout),
+            "this_month_payout": float(this_month_payout),
+            "last_month_payout": float(last_month_payout),
+            "payout_growth": float(payout_growth)
+        }, 200
 
 class MerchantUpdateTransactionStatusResource(Resource):
     @auth_required
