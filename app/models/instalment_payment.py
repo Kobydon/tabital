@@ -23,6 +23,7 @@ class InstalmentPayment(db.Model):
     # Late fee
     late_fee = db.Column(db.Float, default=0)
     late_fee_paid = db.Column(db.Boolean, default=False)
+    late_fee_applied_date = db.Column(db.DateTime)  # Track when late fee was applied
     
     # Timestamps
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
@@ -38,3 +39,52 @@ class InstalmentPayment(db.Model):
             func.max(func.substr(InstalmentPayment.payment_id, 4).cast(db.Integer))
         ).filter(InstalmentPayment.payment_id.isnot(None)).scalar()
         return f"PAY{(result + 1) if result else 1:03d}"
+    
+    def apply_late_fee(self):
+        """
+        Apply 10% late fee if payment is overdue by at least one day.
+        Late fee is 10% of the original payment amount.
+        """
+        if self.status == 'paid':
+            return False
+        
+        if not self.due_date:
+            return False
+        
+        today = datetime.utcnow()
+        
+        # Check if payment is overdue by at least one day
+        if today > self.due_date:
+            days_overdue = (today - self.due_date).days
+            
+            # Apply late fee only if not already applied
+            if self.late_fee == 0 and self.late_fee_paid == False:
+                # Calculate 10% late fee
+                self.late_fee = self.amount * 0.10
+                self.late_fee_applied_date = today
+                self.status = 'overdue'
+                db.session.commit()
+                return True
+        
+        return False
+    
+    def get_total_due(self):
+        """Get total amount due including late fee"""
+        return self.amount + (self.late_fee if not self.late_fee_paid else 0)
+    
+    @staticmethod
+    def apply_late_fees_for_all_overdue_payments():
+        """Static method to apply late fees to all overdue payments (for cron jobs)"""
+        overdue_payments = InstalmentPayment.query.filter(
+            InstalmentPayment.status.in_(['pending', 'overdue']),
+            InstalmentPayment.due_date < datetime.utcnow(),
+            InstalmentPayment.late_fee == 0,
+            InstalmentPayment.late_fee_paid == False
+        ).all()
+        
+        applied_count = 0
+        for payment in overdue_payments:
+            if payment.apply_late_fee():
+                applied_count += 1
+        
+        return applied_count

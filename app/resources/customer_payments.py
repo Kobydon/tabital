@@ -11,7 +11,6 @@ from sqlalchemy import or_
 def safe_str(v): return v if v is not None else ""
 def safe_float(v): return v if v is not None else 0.0
 
-
 class CustomerGetPaymentsResource(Resource):
     @auth_required
     def get(self):
@@ -20,6 +19,9 @@ class CustomerGetPaymentsResource(Resource):
         
         if current_customer.role != "customer":
             return {"error": "Unauthorized"}, 403
+        
+        # Apply late fees to all overdue payments before displaying
+        InstalmentPayment.apply_late_fees_for_all_overdue_payments()
         
         # Get query parameters
         page = request.args.get('page', 1, type=int)
@@ -68,6 +70,13 @@ class CustomerGetPaymentsResource(Resource):
             plan = InstalmentPlan.query.get(payment.plan_id)
             merchant = User.query.get(plan.merchant_id) if plan else None
             
+            # Calculate days overdue if applicable
+            days_overdue = 0
+            if payment.status in ['pending', 'overdue'] and payment.due_date:
+                today = datetime.now()
+                if today > payment.due_date:
+                    days_overdue = (today - payment.due_date).days
+            
             result.append({
                 "id": payment.id,
                 "payment_id": payment.payment_id,
@@ -75,14 +84,16 @@ class CustomerGetPaymentsResource(Resource):
                 "plan_name": safe_str(plan.plan_name if plan else ""),
                 "merchant_name": safe_str(merchant.business_name or merchant.full_name or merchant.phone if merchant else ""),
                 "installment_number": payment.installment_number,
-                "amount": payment.amount,
+                "original_amount": payment.amount,
+                "late_fee": payment.late_fee or 0,
+                "total_due": payment.get_total_due(),
                 "paid_amount": payment.paid_amount,
                 "due_date": payment.due_date.isoformat() if payment.due_date else "",
                 "paid_date": payment.paid_date.isoformat() if payment.paid_date else "",
                 "status": payment.status,
+                "days_overdue": days_overdue,
                 "payment_method": payment.payment_method or "",
                 "payment_reference": payment.payment_reference or "",
-                "late_fee": payment.late_fee or 0,
                 "late_fee_paid": payment.late_fee_paid or False
             })
         
@@ -93,16 +104,17 @@ class CustomerGetPaymentsResource(Resource):
             "limit": limit,
             "total_pages": (total + limit - 1) // limit
         }, 200
-
-
 class CustomerGetPaymentStatsResource(Resource):
     @auth_required
     def get(self):
-        """Get payment statistics for customer"""
+        """Get payment statistics for customer including late fees"""
         current_customer = current_user()
         
         if current_customer.role != "customer":
             return {"error": "Unauthorized"}, 403
+        
+        # Apply late fees before calculating stats
+        InstalmentPayment.apply_late_fees_for_all_overdue_payments()
         
         # Get all instalment payments for customer
         payments = InstalmentPayment.query.join(
@@ -112,8 +124,11 @@ class CustomerGetPaymentStatsResource(Resource):
         ).all()
         
         total_paid = sum(p.amount for p in payments if p.status == 'paid')
-        total_due = sum(p.amount for p in payments if p.status == 'pending')
-        overdue_count = len([p for p in payments if p.status == 'pending' and p.due_date and p.due_date < datetime.now()])
+        total_late_fees_paid = sum(p.late_fee for p in payments if p.late_fee_paid)
+        total_late_fees_unpaid = sum(p.late_fee for p in payments if not p.late_fee_paid and p.late_fee > 0)
+        
+        total_due = sum(p.get_total_due() for p in payments if p.status in ['pending', 'overdue'])
+        overdue_count = len([p for p in payments if p.status in ['pending', 'overdue'] and p.due_date and p.due_date < datetime.now()])
         upcoming_count = len([p for p in payments if p.status == 'pending' and p.due_date and p.due_date >= datetime.now()])
         
         # Calculate on-time rate
@@ -123,13 +138,14 @@ class CustomerGetPaymentStatsResource(Resource):
         
         return {
             "total_paid": total_paid,
+            "total_late_fees_paid": total_late_fees_paid,
+            "total_late_fees_unpaid": total_late_fees_unpaid,
             "total_due": total_due,
             "overdue_count": overdue_count,
             "upcoming_count": upcoming_count,
             "on_time_rate": round(on_time_rate, 1)
         }, 200
-
-
+    
 class CustomerDownloadReceiptResource(Resource):
     @auth_required
     def get(self, payment_id):
@@ -244,11 +260,10 @@ class CustomerPaymentReminderResource(Resource):
             "reminders_sent": len(upcoming_payments)
         }, 200
 
-
 class CustomerMakePaymentResource(Resource):
     @auth_required
     def post(self):
-        """Make a payment for an installment"""
+        """Make a payment for an installment with late fee handling"""
         current_customer = current_user()
         
         if current_customer.role != "customer":
@@ -276,7 +291,26 @@ class CustomerMakePaymentResource(Resource):
         ).order_by(InstalmentPayment.installment_number).first()
         
         if not next_payment:
-            return {"error": "No pending payments found for this plan"}, 400
+            # Also check for overdue payments
+            next_payment = InstalmentPayment.query.filter_by(
+                plan_id=plan.id,
+                status='overdue'
+            ).order_by(InstalmentPayment.installment_number).first()
+            
+            if not next_payment:
+                return {"error": "No pending payments found for this plan"}, 400
+        
+        # Apply late fee if payment is overdue
+        next_payment.apply_late_fee()
+        
+        # Calculate total due (amount + late fee)
+        total_due = next_payment.get_total_due()
+        
+        # Verify payment amount
+        if amount < total_due:
+            return {
+                "error": f"Insufficient payment amount. Total due is {total_due:.2f} (includes {next_payment.late_fee:.2f} late fee)"
+            }, 400
         
         # Process payment
         next_payment.status = 'paid'
@@ -285,9 +319,13 @@ class CustomerMakePaymentResource(Resource):
         next_payment.payment_reference = payment_reference
         next_payment.paid_amount = amount
         
+        # If late fee was applied and paid
+        if next_payment.late_fee > 0 and not next_payment.late_fee_paid:
+            next_payment.late_fee_paid = True
+        
         # Update plan
         plan.paid_installments += 1
-        plan.remaining_amount -= amount
+        plan.remaining_amount -= next_payment.amount
         
         if plan.paid_installments == plan.number_of_installments:
             plan.status = 'completed'
@@ -299,11 +337,12 @@ class CustomerMakePaymentResource(Resource):
         return {
             "message": "Payment successful",
             "payment_reference": next_payment.payment_id,
+            "amount_paid": amount,
+            "late_fee_paid": next_payment.late_fee if next_payment.late_fee_paid else 0,
             "remaining_balance": plan.remaining_amount,
             "paid_installments": plan.paid_installments,
             "total_installments": plan.number_of_installments
         }, 200
-
 
 # resources/customer_paid_payments.py
 from flask_restful import Resource, request
