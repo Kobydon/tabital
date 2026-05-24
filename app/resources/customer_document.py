@@ -285,3 +285,148 @@ class AdminGetPendingKYCResource(Resource):
             "pending_verifications": result,
             "total": len(result)
         }, 200
+    
+
+    # resources/customer_document.py - Update CustomerUploadDocumentsResource
+
+class CustomerUploadDocumentsResource(Resource):
+    @auth_required
+    def post(self):
+        """Upload KYC documents (Ghana Card, Salary Certificate, Bank Statement)"""
+        current_customer = current_user()
+        
+        if current_customer.role != "customer":
+            return {"error": "Unauthorized"}, 403
+        
+        # Required files
+        required_files = ['front_image', 'back_image', 'salary_certificate', 'bank_statement']
+        for file_key in required_files:
+            if file_key not in request.files:
+                return {"error": f"Missing required file: {file_key}"}, 400
+            if request.files[file_key].filename == '':
+                return {"error": f"Empty file for: {file_key}"}, 400
+        
+        # Create upload directory if not exists
+        if not os.path.exists(UPLOAD_FOLDER):
+            os.makedirs(UPLOAD_FOLDER)
+        
+        notes = request.form.get('notes', '')
+        uploaded_documents = []
+        
+        # Document configurations
+        doc_configs = {
+            'front_image': {
+                'name': 'Ghana Card (Front)',
+                'type': 'kyc_front'
+            },
+            'back_image': {
+                'name': 'Ghana Card (Back)',
+                'type': 'kyc_back'
+            },
+            'salary_certificate': {
+                'name': 'Salary Certificate',
+                'type': 'salary_certificate'
+            },
+            'bank_statement': {
+                'name': '3 Months Bank Statement',
+                'type': 'bank_statement'
+            }
+        }
+        
+        for file_key, config in doc_configs.items():
+            file = request.files[file_key]
+            
+            if not allowed_file(file.filename):
+                return {"error": f"File type not allowed for {config['name']}. Allowed: {', '.join(ALLOWED_EXTENSIONS)}"}, 400
+            
+            ext = file.filename.rsplit('.', 1)[1].lower()
+            filename = f"{file_key}_{current_customer.customer_id}_{uuid.uuid4().hex}_{datetime.now().strftime('%Y%m%d%H%M%S')}.{ext}"
+            filepath = os.path.join(UPLOAD_FOLDER, filename)
+            file.save(filepath)
+            
+            document = Document(
+                document_id=Document.generate_document_id(Document),
+                user_id=current_customer.id,
+                document_type=config['type'],
+                document_name=config['name'],
+                file_path=filepath,
+                file_name=filename,
+                file_size=os.path.getsize(filepath),
+                mime_type=file.content_type,
+                status='pending',
+                uploaded_by=current_customer.id
+            )
+            db.session.add(document)
+            uploaded_documents.append({
+                "id": document.id,
+                "document_id": document.document_id,
+                "document_name": document.document_name,
+                "status": document.status
+            })
+        
+        # Update customer KYC status
+        current_customer.kyc_status = 'pending'
+        
+        db.session.commit()
+        
+        return {
+            "message": "Documents uploaded successfully. Verification in progress.",
+            "documents": uploaded_documents
+        }, 201
+    
+
+    # Add to customer_document.py
+class CustomerUploadOptionalDocumentResource(Resource):
+    @auth_required
+    def post(self):
+        """Upload optional KYC document"""
+        current_customer = current_user()
+        
+        if current_customer.role != "customer":
+            return {"error": "Unauthorized"}, 403
+        
+        if 'document' not in request.files:
+            return {"error": "No file provided"}, 400
+        
+        file = request.files['document']
+        document_type = request.form.get('document_type', '')
+        document_name = request.form.get('document_name', 'Optional Document')
+        
+        if file.filename == '':
+            return {"error": "No file selected"}, 400
+        
+        if not allowed_file(file.filename):
+            return {"error": f"File type not allowed. Allowed: {', '.join(ALLOWED_EXTENSIONS)}"}, 400
+        
+        if not os.path.exists(UPLOAD_FOLDER):
+            os.makedirs(UPLOAD_FOLDER)
+        
+        ext = file.filename.rsplit('.', 1)[1].lower()
+        filename = f"{document_type}_{current_customer.customer_id}_{uuid.uuid4().hex}_{datetime.now().strftime('%Y%m%d%H%M%S')}.{ext}"
+        filepath = os.path.join(UPLOAD_FOLDER, filename)
+        file.save(filepath)
+        
+        document = Document(
+            document_id=Document.generate_document_id(Document),
+            user_id=current_customer.id,
+            document_type=document_type,
+            document_name=document_name,
+            file_path=filepath,
+            file_name=filename,
+            file_size=os.path.getsize(filepath),
+            mime_type=file.content_type,
+            status='pending',
+            uploaded_by=current_customer.id
+        )
+        db.session.add(document)
+        db.session.commit()
+        
+        return {
+            "message": f"{document_name} uploaded successfully",
+            "document": {
+                "id": document.id,
+                "document_id": document.document_id,
+                "document_name": document.document_name,
+                "status": document.status
+            }
+        }, 201

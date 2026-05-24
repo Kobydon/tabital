@@ -265,6 +265,9 @@ from .resources.merchant_notifications import (
     MerchantClearAllNotificationsResource
 )
 
+# In routes.py
+from .resources.customer_document import CustomerUploadOptionalDocumentResource
+
 # In register_routes function, add:
 
 # ============================================
@@ -508,7 +511,8 @@ def register_routes(app):
     api.add_resource(MerchantProductsResource, "/merchant/products")
     api.add_resource(MerchantProductDetailResource, "/merchant/products/<int:product_id>")
     api.add_resource(ProtectedResource, "/protected")
-
+        
+    api.add_resource(CustomerUploadOptionalDocumentResource, "/customer/documents/upload-optional")
     # Add to routes.py imports
 
 
