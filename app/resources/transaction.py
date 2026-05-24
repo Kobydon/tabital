@@ -637,4 +637,104 @@ class MerchantExportTransactionsResource(Resource):
             headers={
                 'Content-Disposition': f'attachment; filename=transactions_{datetime.now().strftime("%Y%m%d")}.csv'
             }
+
+
+    
         )
+
+
+# Add these to your Flask API resources
+
+class MerchantPayoutStatsResource(Resource):
+    @auth_required
+    def get(self):
+        current_merchant = current_user()
+        
+        if current_merchant.role != "merchant":
+            return {"error": "Unauthorized"}, 403
+        
+        # Calculate payout stats
+        from ..models.transaction import Transaction
+        
+        # Total payout (all time)
+        total_payout = db.session.query(
+            func.sum(Transaction.payout_amount)
+        ).filter_by(merchant_id=current_merchant.id, status='completed').scalar() or 0
+        
+        total_commission = db.session.query(
+            func.sum(Transaction.commission_amount)
+        ).filter_by(merchant_id=current_merchant.id, status='completed').scalar() or 0
+        
+        # Pending payout (completed but not paid)
+        pending_payout = db.session.query(
+            func.sum(Transaction.payout_amount)
+        ).filter_by(merchant_id=current_merchant.id, status='completed', payment_status='pending').scalar() or 0
+        
+        # Paid payout
+        paid_payout = db.session.query(
+            func.sum(Transaction.payout_amount)
+        ).filter_by(merchant_id=current_merchant.id, status='completed', payment_status='paid').scalar() or 0
+        
+        # This month's payout
+        today = datetime.now()
+        first_day_of_month = today.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        
+        this_month_payout = db.session.query(
+            func.sum(Transaction.payout_amount)
+        ).filter(
+            Transaction.merchant_id == current_merchant.id,
+            Transaction.status == 'completed',
+            Transaction.completion_date >= first_day_of_month
+        ).scalar() or 0
+        
+        # Available for withdrawal (minimum payout is 100)
+        min_payout = 100
+        available_for_withdrawal = pending_payout if pending_payout >= min_payout else 0
+        
+        # Next payout date (next settlement date)
+        next_payout_date = (today + timedelta(days=7)).strftime('%Y-%m-%d')
+        
+        return {
+            "total_payout": float(total_payout),
+            "total_commission": float(total_commission),
+            "pending_payout": float(pending_payout),
+            "paid_payout": float(paid_payout),
+            "this_month_payout": float(this_month_payout),
+            "last_month_payout": 0,
+            "payout_growth": 0,
+            "available_for_withdrawal": float(available_for_withdrawal),
+            "next_payout_date": next_payout_date,
+            "payout_history": []
+        }, 200
+
+
+class MerchantRecentPayoutsResource(Resource):
+    @auth_required
+    def get(self):
+        current_merchant = current_user()
+        
+        if current_merchant.role != "merchant":
+            return {"error": "Unauthorized"}, 403
+        
+        limit = request.args.get('limit', 5, type=int)
+        
+        # Get recent completed transactions
+        transactions = Transaction.query.filter_by(
+            merchant_id=current_merchant.id,
+            status='completed'
+        ).order_by(Transaction.completion_date.desc()).limit(limit).all()
+        
+        result = []
+        for t in transactions:
+            result.append({
+                "id": t.id,
+                "payout_id": t.transaction_id,
+                "amount": float(t.amount),
+                "payout_amount": float(getattr(t, 'payout_amount', t.amount * 0.9)),
+                "commission_amount": float(getattr(t, 'commission_amount', t.amount * 0.1)),
+                "status": t.payment_status or 'pending',
+                "date": t.completion_date.isoformat() if t.completion_date else t.created_at.isoformat(),
+                "product_name": t.product_name
+            })
+        
+        return result, 200

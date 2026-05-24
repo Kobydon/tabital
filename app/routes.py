@@ -27,6 +27,8 @@ from .resources.admin import (
 from .resources.transaction import (
     GetTransactionsResource,
     CreateTransactionResource,
+    MerchantPayoutStatsResource,
+    MerchantRecentPayoutsResource,
     UpdateTransactionStatusResource,
     GetTransactionStatsResource,
     DeleteTransactionResource,
@@ -607,4 +609,7 @@ def register_routes(app):
     api.add_resource(MerchantUnreadNotificationCountResource, "/merchant/notifications/unread-count")
     api.add_resource(MerchantDeleteNotificationResource, "/merchant/notifications/<string:notification_id>")
     api.add_resource(MerchantClearAllNotificationsResource, "/merchant/notifications/clear-all")
+    # Add to your API routes
+    api.add_resource(MerchantPayoutStatsResource, '/merchant/payouts/stats')
+    api.add_resource(MerchantRecentPayoutsResource, '/merchant/payouts/recent')
 
