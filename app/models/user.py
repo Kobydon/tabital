@@ -49,7 +49,7 @@ class User(db.Model):
     business_address = db.Column(db.String(200))
     business_phone = db.Column(db.String(20),unique=True)
     business_email = db.Column(db.String(100),unique=True)
-    email=db.Column(db.String(100),unique=True)
+    email=db.Column(db.String(100))
     website = db.Column(db.String(200),unique=True)
     description = db.Column(db.Text)
     total_products = db.Column(db.Integer, default=0)
