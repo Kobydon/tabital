@@ -1,5 +1,21 @@
 from ..models.user import User
 from ..extensions import db, guard
+
+def register_user(data):
+    user = User(**data)
+
+    user.password = guard.hash_password(data.get("password"))
+
+    # 👇 IMPORTANT LOGIC
+    if user.role == "admin":
+        user.status = "approved"
+    else:
+        user.status = "pending"
+
+    db.session.add(user)
+    db.session.commit()
+
+    return user
 # ============================================
 # auth.py - ALTERNATIVE APPROACH
 # ============================================
