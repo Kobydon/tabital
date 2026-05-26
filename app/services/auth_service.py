@@ -16,46 +16,36 @@ def register_user(data):
     db.session.commit()
 
     return user
-# ============================================
-# auth.py - ALTERNATIVE APPROACH
-# ============================================
+from sqlalchemy import or_
 
 def login_user(identifier, password):
     """
-    Login using either phone number OR business_email with password
-    Blocks users who are not approved
+    Login with phone OR business_email
     """
-    # Try to find user by phone OR business_email
-    user = None
-    
-    # Try by phone
-    user = User.query.filter(User.phone == identifier).first()
-    
-    # If not found by phone, try by business_email
-    if not user:
-        user = User.query.filter(User.business_email == identifier).first()
-    
-    # If still not found, try by email
-    if not user:
-        user = User.query.filter(User.email == identifier).first()
-    
-    if not user:
-        raise Exception("Invalid phone number/email or password")
 
-    
-    # Alternative: Use guard.authenticate with the found user
-    # or implement password check manually
-    from werkzeug.security import check_password_hash
-    
-    if not check_password_hash(user.password, password):
-        raise Exception("Invalid phone number/email or password")
-    
-    # 🚫 BLOCK UNAPPROVED USERS
+    # FIND USER BY PHONE OR BUSINESS EMAIL
+    user = User.query.filter(
+        or_(
+            User.phone == identifier,
+            User.business_email == identifier
+        )
+    ).first()
+
+    # USER NOT FOUND
+    if not user:
+        raise Exception("Invalid phone/email or password")
+
+    # VERIFY PASSWORD
+    if not guard.pwd_ctx.verify(password, user.password):
+        raise Exception("Invalid phone/email or password")
+
+    # CHECK APPROVAL
     if user.status != "approved":
-        raise Exception("Account not approved yet. Please wait for admin approval.")
-    
-    # Generate and return token
-    from flask_praetorian import Praetorian
-    guard = Praetorian()
+        raise Exception(
+            "Account not approved yet. Please wait for admin approval."
+        )
+
+    # GENERATE TOKEN
     token = guard.encode_jwt_token(user)
+
     return token
