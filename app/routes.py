@@ -623,15 +623,10 @@ def register_routes(app):
     api.add_resource(MerchantRecentPayoutsResource, '/merchant/payouts/recent')
     # routes.py - Add these imports
 
-# In register_routes function, add these routes:
 
-    # ============================================
-    # AUTHENTICATION ROUTES
-    # ============================================
-    # api.add_resource(RegisterResource, "/register")
-    # api.add_resource(LoginResource, "/login")
     api.add_resource(ForgotPasswordResource, "/forgot-password")
-    api.add_resource(VerifyResetOTPResource, "/verify-otp")
+    # routes.py - Change the route path
+    api.add_resource(VerifyResetOTPResource, "/api/verify-otp")
     api.add_resource(ResetPasswordResource, "/reset-password")
     
     # ... rest of your routes
