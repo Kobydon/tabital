@@ -202,7 +202,7 @@ class VerifyResetOTPResource(Resource):
         if not email or not otp:
             return {"error": "Email and OTP are required"}, 400
         
-        user = User.query.filter_by(email=email).first()
+        user = User.query.filter_by(business_email=email).first()
         
         if not user:
             return {"error": "Invalid request"}, 404
