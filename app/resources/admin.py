@@ -619,8 +619,7 @@ class AdminApproveOrderResource(Resource):
                 customer_phone=order.customer.phone or "",
                 customer_email=order.customer.email or "",
                 # Store payout information
-                commission_rate=commission_rate,
-                commission_amount=commission_amount,
+               
                 payout_amount=payout_amount
             )
             db.session.add(instalment_plan)
@@ -741,8 +740,7 @@ class AdminApproveOrderResource(Resource):
                 payment_status='processing',
                 delivery_address=order.delivery_address or "",
                 transaction_date=datetime.now(),
-                commission_rate=commission_rate,
-                commission_amount=commission_amount,
+              
                 payout_amount=payout_amount
             )
             db.session.add(transaction)
@@ -768,8 +766,6 @@ class AdminApproveOrderResource(Resource):
             "plan_id": instalment_plan.plan_id,
             "payments_created": payments_created,
             "order_total": float(order.total_payable),
-            "commission_rate": commission_rate,
-            "commission_amount": commission_amount,
             "payout_amount": payout_amount,
             "currency": "GHS"
         }, 200

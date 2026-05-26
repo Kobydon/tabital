@@ -629,5 +629,6 @@ def register_routes(app):
     api.add_resource(VerifyResetOTPResource, "/api/verify-otp")
     api.add_resource(ResetPasswordResource, "/reset-password")
     
+    
     # ... rest of your routes
 

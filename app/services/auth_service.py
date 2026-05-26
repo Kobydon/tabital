@@ -27,7 +27,7 @@ def login_user(identifier, password):
     user = User.query.filter(
         or_(
             User.phone == identifier,
-            User.business_email == identifier
+            User.business_email == identifier.lower()
         )
     ).first()
 
