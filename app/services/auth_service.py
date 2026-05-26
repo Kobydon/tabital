@@ -247,8 +247,8 @@ class ResetPasswordResource(Resource):
             return {"error": "Reset token has expired. Please request a new one."}, 401
         
         # Update password
-        from flask_praetorian import Praetorian
-        guard = Praetorian()
+        # from flask_praetorian import Praetorian
+        # guard = Praetorian()
         user.password = guard.encrypt_password(new_password)
         
         # Clear reset fields
