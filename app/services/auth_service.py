@@ -72,7 +72,7 @@ class ForgotPasswordResource(Resource):
             return {"error": "Email address is required"}, 400
         
         # Find user by email
-        user = User.query.filter_by(email=email).first()
+        user = User.query.filter_by(business_email=email).first()
         
         if not user:
             # For security, don't reveal if user exists
