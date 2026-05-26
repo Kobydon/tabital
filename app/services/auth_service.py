@@ -1,5 +1,5 @@
 from ..models.user import User
-from ..extensions import db, guard
+from ..extensions import *
 
 def register_user(data):
     user = User(**data)
