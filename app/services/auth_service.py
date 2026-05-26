@@ -17,7 +17,7 @@ def register_user(data):
 
     return user
 
-def login_user(business_email, password):
+def login_user(identifier, password):
     """
     Login using either phone number OR business_email with password
     Blocks users who are not approved
@@ -30,7 +30,7 @@ def login_user(business_email, password):
         JWT token if authentication successful
     """
     # Try to authenticate using guard with identifier (handles both phone and email)
-    user = guard.authenticate(business_email, password)
+    user = guard.authenticate(identifier, password)
     
     if not user:
         raise Exception("Invalid phone number/email or password")
