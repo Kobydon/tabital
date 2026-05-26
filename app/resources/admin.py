@@ -617,10 +617,10 @@ class AdminApproveOrderResource(Resource):
                 paid_installments=1,
                 customer_name=order.customer.full_name or order.customer.business_name or "Customer",
                 customer_phone=order.customer.phone or "",
-                customer_email=order.customer.email or "",
+                customer_email=order.customer.email or ""
                 # Store payout information
                
-                payout_amount=payout_amount
+                # payout_amount=payout_amount
             )
             db.session.add(instalment_plan)
             db.session.flush()
