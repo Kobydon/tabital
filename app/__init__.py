@@ -6,6 +6,7 @@ from .extensions import db, ma, guard
 from .config import Config
 from .routes import register_routes
 from .models.user import User
+from .extensions import db, ma, guard, mail
 # app/__init__.py
 
 def create_app():
@@ -28,6 +29,8 @@ def create_app():
     # Initialize extensions
     db.init_app(app)
     ma.init_app(app)
+    mail.init_app(app)  # Initialize mail here
+    
     guard.init_app(app, User)
     
     # ✅ Initialize Flask-Migrate

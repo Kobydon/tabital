@@ -48,6 +48,15 @@ from .resources.document import (
     DeleteDocumentResource
 )
 
+
+from .services.auth_service import (
+
+    ForgotPasswordResource,
+    VerifyResetOTPResource,
+    ResetPasswordResource
+)
+
+
 # Auth Resources
 from .resources.auth import RegisterResource, LoginResource
 
@@ -612,4 +621,18 @@ def register_routes(app):
     # Add to your API routes
     api.add_resource(MerchantPayoutStatsResource, '/merchant/payouts/stats')
     api.add_resource(MerchantRecentPayoutsResource, '/merchant/payouts/recent')
+    # routes.py - Add these imports
+
+# In register_routes function, add these routes:
+
+    # ============================================
+    # AUTHENTICATION ROUTES
+    # ============================================
+    # api.add_resource(RegisterResource, "/register")
+    # api.add_resource(LoginResource, "/login")
+    api.add_resource(ForgotPasswordResource, "/forgot-password")
+    api.add_resource(VerifyResetOTPResource, "/verify-otp")
+    api.add_resource(ResetPasswordResource, "/reset-password")
+    
+    # ... rest of your routes
 

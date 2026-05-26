@@ -76,6 +76,10 @@ class User(db.Model):
     
     created_at = db.Column(db.DateTime, server_default=db.func.now())
     updated_at = db.Column(db.DateTime, onupdate=db.func.now())
+    reset_otp = db.Column(db.String(10))
+    reset_otp_expiry = db.Column(db.DateTime)
+    reset_token = db.Column(db.String(100))
+    reset_token_expiry = db.Column(db.DateTime)
 
     # Flask-Praetorian Methods
     @property
