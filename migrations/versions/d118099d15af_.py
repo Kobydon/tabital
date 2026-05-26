@@ -1,8 +1,8 @@
 """empty message
 
-Revision ID: e4caff1124c9
+Revision ID: d118099d15af
 Revises: 
-Create Date: 2026-05-22 17:06:02.340552
+Create Date: 2026-05-26 07:19:03.405373
 
 """
 from alembic import op
@@ -10,7 +10,7 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision = 'e4caff1124c9'
+revision = 'd118099d15af'
 down_revision = None
 branch_labels = None
 depends_on = None
@@ -81,7 +81,15 @@ def upgrade():
     sa.Column('created_at', sa.DateTime(), server_default=sa.text('now()'), nullable=True),
     sa.Column('updated_at', sa.DateTime(), nullable=True),
     sa.PrimaryKeyConstraint('id'),
-    sa.UniqueConstraint('phone')
+    sa.UniqueConstraint('account_number'),
+    sa.UniqueConstraint('business_email'),
+    sa.UniqueConstraint('business_phone'),
+    sa.UniqueConstraint('email'),
+    sa.UniqueConstraint('momo_number'),
+    sa.UniqueConstraint('phone'),
+    sa.UniqueConstraint('ref_phone'),
+    sa.UniqueConstraint('swift_code'),
+    sa.UniqueConstraint('website')
     )
     with op.batch_alter_table('users', schema=None) as batch_op:
         batch_op.create_index(batch_op.f('ix_users_customer_id'), ['customer_id'], unique=True)
@@ -219,6 +227,7 @@ def upgrade():
     sa.Column('customer_id', sa.Integer(), nullable=False),
     sa.Column('merchant_id', sa.Integer(), nullable=False),
     sa.Column('amount', sa.Float(), nullable=False),
+    sa.Column('payout_amount', sa.Float(), nullable=True),
     sa.Column('product_name', sa.String(length=200), nullable=False),
     sa.Column('product_description', sa.Text(), nullable=True),
     sa.Column('quantity', sa.Integer(), nullable=True),
@@ -388,6 +397,7 @@ def upgrade():
     sa.Column('payment_reference', sa.String(length=100), nullable=True),
     sa.Column('late_fee', sa.Float(), nullable=True),
     sa.Column('late_fee_paid', sa.Boolean(), nullable=True),
+    sa.Column('late_fee_applied_date', sa.DateTime(), nullable=True),
     sa.Column('created_at', sa.DateTime(), nullable=True),
     sa.Column('updated_at', sa.DateTime(), nullable=True),
     sa.ForeignKeyConstraint(['plan_id'], ['instalment_plans.id'], ),

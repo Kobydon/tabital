@@ -39,7 +39,7 @@ class ApproveUserResource(Resource):
         if not user:
             return {"error": "User not found"}, 404
         user.status = "approved"
-        if user.role == "customer" and not user.customer_i:
+        if user.role == "customer" and not user.customer_id:
             user.customer_id = user.generate_customer_id()
         elif user.role == "merchant" and not user.merchant_id:
             user.merchant_id = user.generate_merchant_id()
