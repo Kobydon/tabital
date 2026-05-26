@@ -50,7 +50,7 @@ class User(db.Model):
     business_phone = db.Column(db.String(20),unique=True)
     business_email = db.Column(db.String(100),unique=True)
     email=db.Column(db.String(100))
-    website = db.Column(db.String(200),unique=True)
+    website = db.Column(db.String(200))
     description = db.Column(db.Text)
     total_products = db.Column(db.Integer, default=0)
     total_sales = db.Column(db.Float, default=0)
