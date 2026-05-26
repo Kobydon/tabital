@@ -41,10 +41,7 @@ def login_user(identifier, password):
     
     if not user:
         raise Exception("Invalid phone number/email or password")
-    
-    # Verify password using Flask-Praetorian's method
-    if not user.verify_password(password):  # You might need to implement this
-        raise Exception("Invalid phone number/email or password")
+
     
     # Alternative: Use guard.authenticate with the found user
     # or implement password check manually
