@@ -2,7 +2,7 @@ from psycopg2 import IntegrityError
 
 from ..models.user import User
 from ..extensions import *
-from sqlalchemy.exc import IntegrityErro
+
 def register_user(data):
     user = User(**data)
 
