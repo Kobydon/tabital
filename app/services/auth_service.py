@@ -26,21 +26,21 @@ def register_user(data):
         
         # Check for duplicate email (business_email)
         if 'business_email' in error_message.lower():
-            raise ValueError({
+            return ValueError({
                 'field': 'business_email',
                 'message': 'This email address is already registered. Please use a different email or login.'
             })
         
         # Check for duplicate phone number
         elif 'phone' in error_message.lower():
-            raise ValueError({
+            return ValueError({
                 'field': 'phone',
                 'message': 'This phone number is already registered. Please use a different number or login.'
             })
         
         # Generic integrity error
         else:
-            raise ValueError({
+            return ValueError({
                 'field': 'general',
                 'message': 'Registration failed. The information you provided may already be registered.'
             })
