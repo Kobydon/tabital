@@ -67,11 +67,11 @@ def login_user(identifier, password):
 
     # USER NOT FOUND
     if not user:
-        raise Exception("Invalid phone/email or password")
+        return 401
 
     # VERIFY PASSWORD
     if not guard.pwd_ctx.verify(password, user.password):
-        raise Exception("Invalid phone/email or password")
+        return 401
 
     # CHECK APPROVAL
     if user.status != "approved":
