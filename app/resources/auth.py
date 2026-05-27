@@ -2,7 +2,7 @@ from flask_restful import Resource
 from flask import request
 from ..services.auth_service import register_user, login_user
 from flask import request
-from ..models import User  # 
+from app.models.user import User # 
 class RegisterResource(Resource):
     def post(self):
         data = request.json
