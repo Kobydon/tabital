@@ -61,6 +61,7 @@ class User(db.Model):
     momo_number = db.Column(db.String(100),unique=True)
     bank_name = db.Column(db.String(100))
     account_name = db.Column(db.String(100))
+    branch_name = db.Column(db.String(100))
     account_number = db.Column(db.String(100),unique=True)
     
     # KYC Fields
