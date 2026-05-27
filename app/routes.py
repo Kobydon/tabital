@@ -58,7 +58,7 @@ from .services.auth_service import (
 
 
 # Auth Resources
-from .resources.auth import RegisterResource, LoginResource
+from .resources.auth import CheckUserExistsResource, RegisterResource, LoginResource
 
 # Protected Resources
 from .resources.protected import ProtectedResource
@@ -628,7 +628,8 @@ def register_routes(app):
     # routes.py - Change the route path
     api.add_resource(VerifyResetOTPResource, "/api/verify-otp")
     api.add_resource(ResetPasswordResource, "/reset-password")
-    
+    # In your main app file or routes file
+    api.add_resource(CheckUserExistsResource, '/api/check-user-exists')
     
     # ... rest of your routes
 
