@@ -1,21 +1,55 @@
+from psycopg2 import IntegrityError
+
 from ..models.user import User
 from ..extensions import *
-
+from sqlalchemy.exc import IntegrityErro
 def register_user(data):
     user = User(**data)
 
     user.password = guard.hash_password(data.get("password"))
 
-    # 👇 IMPORTANT LOGIC
+    # IMPORTANT LOGIC
     if user.role == "admin":
         user.status = "approved"
     else:
         user.status = "pending"
 
-    db.session.add(user)
-    db.session.commit()
+    try:
+        db.session.add(user)
+        db.session.commit()
+        return user
+        
+    except IntegrityError as e:
+        db.session.rollback()  # CRITICAL: Rollback the failed transaction
+        
+        error_message = str(e.orig) if e.orig else str(e)
+        
+        # Check for duplicate email (business_email)
+        if 'business_email' in error_message.lower():
+            raise ValueError({
+                'field': 'business_email',
+                'message': 'This email address is already registered. Please use a different email or login.'
+            })
+        
+        # Check for duplicate phone number
+        elif 'phone' in error_message.lower():
+            raise ValueError({
+                'field': 'phone',
+                'message': 'This phone number is already registered. Please use a different number or login.'
+            })
+        
+        # Generic integrity error
+        else:
+            raise ValueError({
+                'field': 'general',
+                'message': 'Registration failed. The information you provided may already be registered.'
+            })
+            
+    except Exception as e:
+        db.session.rollback()
+        raise e
 
-    return user
+
 from sqlalchemy import or_
 
 def login_user(identifier, password):
