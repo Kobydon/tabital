@@ -276,6 +276,7 @@ Your account is now fully verified and you can now:
 • Add and manage products
 • Receive payments
 • Access all merchant features
+
 • Apply for merchant loans
 
 Thank you for completing your verification."""
