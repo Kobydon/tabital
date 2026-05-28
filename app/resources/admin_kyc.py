@@ -7,6 +7,7 @@ from datetime import datetime
 import os
 import base64
 # resources/admin_kyc.py - Update the get method
+
 class AdminGetPendingMerchantKYCResource(Resource):
     @auth_required
     def get(self):
@@ -83,6 +84,38 @@ class AdminGetPendingMerchantKYCResource(Resource):
         
         return {
             "pending_verifications": result,
+            "total": len(result)
+        }, 200
+
+class AdminGetVerifiedKYCResource(Resource):
+    @auth_required
+    def get(self):
+        """Get all verified merchants"""
+        current_admin = current_user()
+        
+        if current_admin.role != 'admin':
+            return {"error": "Unauthorized"}, 403
+        
+        verified_merchants = User.query.filter(
+            User.role == 'merchant',
+            User.kyc_status == 'verified'
+        ).all()
+        
+        result = []
+        for merchant in verified_merchants:
+            result.append({
+                "merchant_id": merchant.id,
+                "merchant_name": merchant.business_name or merchant.full_name,
+                "owner_name": merchant.owner_name,
+                "phone": merchant.phone,
+                "email": merchant.business_email or merchant.email,
+                "kyc_status": merchant.kyc_status,
+                "verified_at": merchant.kyc_completed_on.isoformat() if merchant.kyc_completed_on else None,
+                "verification_level": merchant.verification_level
+            })
+        
+        return {
+            "verified_merchants": result,
             "total": len(result)
         }, 200
 
