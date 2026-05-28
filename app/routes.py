@@ -275,7 +275,7 @@ from .resources.merchant_notifications import (
     MerchantDeleteNotificationResource,
     MerchantClearAllNotificationsResource
 )
-from resources.admin_kyc import (
+from .resources.admin_kyc import (
     AdminGetPendingKYCResource,
     AdminGetVerifiedKYCResource,
     AdminGetRejectedKYCResource,
