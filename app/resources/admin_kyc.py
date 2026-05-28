@@ -1,12 +1,16 @@
+# resources/admin_kyc.py
+
 from flask_restful import Resource, request
 from flask_praetorian import auth_required, current_user
 from ..models.user import User
 from ..models.document import Document
+from app.models.notifications import Notifications
 from ..extensions import db
 from datetime import datetime
 import os
 import base64
-# resources/admin_kyc.py - Update the get method
+import json
+
 
 class AdminGetPendingKYCResource(Resource):
     @auth_required
@@ -40,7 +44,7 @@ class AdminGetPendingKYCResource(Resource):
                         try:
                             with open(doc.file_path, 'rb') as f:
                                 file_data = base64.b64encode(f.read()).decode('utf-8')
-                                print(f"Loaded file: {doc.file_name}, size: {len(file_data)} chars")  # Debug log
+                                print(f"Loaded file: {doc.file_name}, size: {len(file_data)} chars")
                         except Exception as e:
                             print(f"Error reading file {doc.file_path}: {str(e)}")
                             file_data = None
@@ -54,7 +58,7 @@ class AdminGetPendingKYCResource(Resource):
                         "document_type": doc.document_type,
                         "status": doc.status,
                         "uploaded_at": doc.created_at.isoformat() if doc.created_at else None,
-                        "file_data": file_data,  # This should now have base64 data
+                        "file_data": file_data,
                         "file_name": doc.file_name,
                         "file_size": doc.file_size,
                         "mime_type": doc.mime_type,
@@ -88,6 +92,7 @@ class AdminGetPendingKYCResource(Resource):
             "pending_verifications": result,
             "total": len(result)
         }, 200
+
 
 class AdminGetVerifiedKYCResource(Resource):
     @auth_required
@@ -160,6 +165,7 @@ class AdminGetRejectedKYCResource(Resource):
             "total": len(result)
         }, 200
 
+
 class AdminGetMerchantKYCResource(Resource):
     @auth_required
     def get(self, merchant_id):
@@ -228,23 +234,12 @@ class AdminGetMerchantKYCResource(Resource):
                 "momo_number": merchant.momo_number
             }
         }, 200
-# resources/admin_kyc.py
 
-from flask_restful import Resource, request
-from flask_praetorian import auth_required, current_user
-from ..models.user import User
-from ..models.document import Document
-from app.models.notifications import Notifications
-from ..extensions import db
-from datetime import datetime
-import os
-import base64
-import json
 
 class AdminApproveKYCResource(Resource):
     @auth_required
     def put(self, merchant_id):
-        """Approve a merchant's KYC verification"""
+        """Approve a merchant's KYC verification and update user status"""
         current_admin = current_user()
         
         if current_admin.role != 'admin':
@@ -267,56 +262,65 @@ class AdminApproveKYCResource(Resource):
             merchant.verification_level = 'verified'
             merchant.kyc_completed_on = datetime.now()
             
+            # IMPORTANT: Update the user status from 'pending' to 'approved'
+            merchant.status = 'approved'
+            
             db.session.commit()
             
             # Create notification for the merchant
-            notification_title = "✅ KYC Verification Approved"
-            notification_message = f"""Congratulations! Your KYC verification has been approved. 
-Your account is now fully verified and you can now:
+            try:
+                notification_title = "✅ KYC Verification Approved"
+                notification_message = f"""Congratulations {merchant.business_name or merchant.full_name}! Your KYC verification has been approved.
+
+Your account is now fully verified and your status has been updated to 'approved'. You can now:
 • Add and manage products
 • Receive payments
 • Access all merchant features
-
 • Apply for merchant loans
 
 Thank you for completing your verification."""
-            
-            Notifications.create_notification(
-                user_id=merchant.id,
-                user_role='merchant',
-                title=notification_title,
-                message=notification_message,
-                type='kyc',
-                link='/merchant/dashboard',
-                action_text='Go to Dashboard',
-                extra_data={
-                    'kyc_status': 'verified',
-                    'approved_by': current_admin.id,
-                    'approved_by_name': current_admin.full_name or 'Admin',
-                    'approved_at': datetime.now().isoformat()
-                }
-            )
-            
-            # Also create notification for admin (optional)
-            Notifications.create_notification(
-                user_id=current_admin.id,
-                user_role='admin',
-                title=f"Merchant KYC Approved",
-                message=f"KYC verification for {merchant.business_name or merchant.full_name} has been approved.",
-                type='kyc',
-                link='/admin/kyc-verification',
-                action_text='View Details',
-                extra_data={
-                    'merchant_id': merchant.id,
-                    'merchant_name': merchant.business_name or merchant.full_name,
-                    'action': 'approved'
-                }
-            )
+                
+                Notifications.create_notification(
+                    user_id=merchant.id,
+                    user_role='merchant',
+                    title=notification_title,
+                    message=notification_message,
+                    type='kyc',
+                    link='/merchant/dashboard',
+                    action_text='Go to Dashboard',
+                    extra_data={
+                        'kyc_status': 'verified',
+                        'user_status': 'approved',
+                        'approved_by': current_admin.id,
+                        'approved_by_name': current_admin.full_name or 'Admin',
+                        'approved_at': datetime.now().isoformat()
+                    }
+                )
+                
+                # Also create notification for admin
+                Notifications.create_notification(
+                    user_id=current_admin.id,
+                    user_role='admin',
+                    title=f"Merchant KYC Approved",
+                    message=f"KYC verification for {merchant.business_name or merchant.full_name} has been approved. User status updated to 'approved'.",
+                    type='kyc',
+                    link='/admin/kyc-verification',
+                    action_text='View Details',
+                    extra_data={
+                        'merchant_id': merchant.id,
+                        'merchant_name': merchant.business_name or merchant.full_name,
+                        'user_status': 'approved',
+                        'action': 'approved'
+                    }
+                )
+            except Exception as e:
+                print(f"Notification error (non-critical): {str(e)}")
             
             return {
                 "message": "KYC verification approved successfully",
                 "merchant_id": merchant.id,
-                "status": "verified",
+                "kyc_status": "verified",
+                "user_status": merchant.status,
                 "notification_sent": True
             }, 200
             
@@ -354,14 +358,16 @@ class AdminRejectKYCResource(Resource):
                 doc.verified_by = current_admin.id
                 doc.verified_at = datetime.now()
             
-            # Update merchant KYC status
+            # Update merchant KYC status to rejected
             merchant.kyc_status = 'rejected'
+            # Keep user status as 'pending' (do not change to approved)
             
             db.session.commit()
             
             # Create notification for the merchant
-            notification_title = "❌ KYC Verification Rejected"
-            notification_message = f"""Your KYC verification has been rejected.
+            try:
+                notification_title = "❌ KYC Verification Rejected"
+                notification_message = f"""Your KYC verification has been rejected.
 
 Rejection Reason: {rejection_reason}
 
@@ -372,45 +378,47 @@ Please review the following issues:
 • Make sure all required documents are uploaded
 
 Please upload corrected documents for re-verification."""
-            
-            Notifications.create_notification(
-                user_id=merchant.id,
-                user_role='merchant',
-                title=notification_title,
-                message=notification_message,
-                type='kyc',
-                link='/merchant/documents',
-                action_text='Upload Documents Again',
-                extra_data={
-                    'kyc_status': 'rejected',
-                    'rejection_reason': rejection_reason,
-                    'rejected_by': current_admin.id,
-                    'rejected_by_name': current_admin.full_name or 'Admin',
-                    'rejected_at': datetime.now().isoformat()
-                }
-            )
-            
-            # Also create notification for admin
-            Notifications.create_notification(
-                user_id=current_admin.id,
-                user_role='admin',
-                title=f"Merchant KYC Rejected",
-                message=f"KYC verification for {merchant.business_name or merchant.full_name} has been rejected.\nReason: {rejection_reason}",
-                type='kyc',
-                link='/admin/kyc-verification',
-                action_text='View Details',
-                extra_data={
-                    'merchant_id': merchant.id,
-                    'merchant_name': merchant.business_name or merchant.full_name,
-                    'rejection_reason': rejection_reason,
-                    'action': 'rejected'
-                }
-            )
+                
+                Notifications.create_notification(
+                    user_id=merchant.id,
+                    user_role='merchant',
+                    title=notification_title,
+                    message=notification_message,
+                    type='kyc',
+                    link='/merchant/documents',
+                    action_text='Upload Documents Again',
+                    extra_data={
+                        'kyc_status': 'rejected',
+                        'rejection_reason': rejection_reason,
+                        'rejected_by': current_admin.id,
+                        'rejected_by_name': current_admin.full_name or 'Admin',
+                        'rejected_at': datetime.now().isoformat()
+                    }
+                )
+                
+                # Also create notification for admin
+                Notifications.create_notification(
+                    user_id=current_admin.id,
+                    user_role='admin',
+                    title=f"Merchant KYC Rejected",
+                    message=f"KYC verification for {merchant.business_name or merchant.full_name} has been rejected.\nReason: {rejection_reason}",
+                    type='kyc',
+                    link='/admin/kyc-verification',
+                    action_text='View Details',
+                    extra_data={
+                        'merchant_id': merchant.id,
+                        'merchant_name': merchant.business_name or merchant.full_name,
+                        'rejection_reason': rejection_reason,
+                        'action': 'rejected'
+                    }
+                )
+            except Exception as e:
+                print(f"Notification error (non-critical): {str(e)}")
             
             return {
                 "message": "KYC verification rejected",
                 "merchant_id": merchant.id,
-                "status": "rejected",
+                "kyc_status": "rejected",
                 "rejection_reason": rejection_reason,
                 "notification_sent": True
             }, 200
@@ -444,7 +452,7 @@ class AdminApproveDocumentResource(Resource):
                 user_id=document.user_id
             ).all()
             
-            all_verified = all(d.status == 'verified' for d in merchant_docs)
+            all_verified = all(d.status == 'verified' for d in merchant_docs) if merchant_docs else False
             
             if all_verified and len(merchant_docs) >= 3:
                 merchant = User.query.get(document.user_id)
@@ -452,32 +460,42 @@ class AdminApproveDocumentResource(Resource):
                     merchant.kyc_status = 'verified'
                     merchant.verification_level = 'verified'
                     merchant.kyc_completed_on = datetime.now()
+                    # Update user status to approved when all documents are verified
+                    merchant.status = 'approved'
+                    
+                    db.session.commit()
                     
                     # Send notification for full verification
-                    Notifications.create_notification(
-                        user_id=merchant.id,
-                        user_role='merchant',
-                        title="✅ KYC Verification Complete",
-                        message=f"Congratulations! All your documents have been verified. Your account is now fully verified.",
-                        type='kyc',
-                        link='/merchant/dashboard',
-                        action_text='Go to Dashboard',
-                        extra_data={'kyc_status': 'verified'}
-                    )
+                    try:
+                        Notifications.create_notification(
+                            user_id=merchant.id,
+                            user_role='merchant',
+                            title="✅ KYC Verification Complete",
+                            message=f"Congratulations! All your documents have been verified. Your account is now fully verified and active.",
+                            type='kyc',
+                            link='/merchant/dashboard',
+                            action_text='Go to Dashboard',
+                            extra_data={'kyc_status': 'verified', 'user_status': 'approved'}
+                        )
+                    except Exception as e:
+                        print(f"Notification error: {str(e)}")
             
             db.session.commit()
             
             # Send notification for document approval
-            Notifications.create_notification(
-                user_id=document.user_id,
-                user_role='merchant',
-                title=f"Document Approved: {document.document_name}",
-                message=f"Your {document.document_name} has been approved. {'Your account is now fully verified!' if all_verified else 'Please wait for other documents to be reviewed.'}",
-                type='kyc',
-                link='/merchant/documents',
-                action_text='View Documents',
-                extra_data={'document_id': document.id, 'document_type': document.document_type}
-            )
+            try:
+                Notifications.create_notification(
+                    user_id=document.user_id,
+                    user_role='merchant',
+                    title=f"Document Approved: {document.document_name}",
+                    message=f"Your {document.document_name} has been approved. {'Your account is now fully verified!' if all_verified else 'Please wait for other documents to be reviewed.'}",
+                    type='kyc',
+                    link='/merchant/documents',
+                    action_text='View Documents',
+                    extra_data={'document_id': document.id, 'document_type': document.document_type}
+                )
+            except Exception as e:
+                print(f"Notification error: {str(e)}")
             
             return {
                 "message": "Document approved successfully",
@@ -517,32 +535,36 @@ class AdminRejectDocumentResource(Resource):
             document.verified_by = current_admin.id
             document.verified_at = datetime.now()
             
-            # Update merchant KYC status
+            # Update merchant KYC status to rejected
             merchant = User.query.get(document.user_id)
             if merchant:
                 merchant.kyc_status = 'rejected'
+                # Keep user status as 'pending' (do not change to approved)
             
             db.session.commit()
             
             # Send notification for document rejection
-            Notifications.create_notification(
-                user_id=document.user_id,
-                user_role='merchant',
-                title=f"Document Rejected: {document.document_name}",
-                message=f"""Your {document.document_name} has been rejected.
+            try:
+                Notifications.create_notification(
+                    user_id=document.user_id,
+                    user_role='merchant',
+                    title=f"Document Rejected: {document.document_name}",
+                    message=f"""Your {document.document_name} has been rejected.
 
 Reason: {rejection_reason}
 
 Please upload a corrected version of this document for re-verification.""",
-                type='kyc',
-                link='/merchant/documents',
-                action_text='Upload Again',
-                extra_data={
-                    'document_id': document.id,
-                    'document_type': document.document_type,
-                    'rejection_reason': rejection_reason
-                }
-            )
+                    type='kyc',
+                    link='/merchant/documents',
+                    action_text='Upload Again',
+                    extra_data={
+                        'document_id': document.id,
+                        'document_type': document.document_type,
+                        'rejection_reason': rejection_reason
+                    }
+                )
+            except Exception as e:
+                print(f"Notification error: {str(e)}")
             
             return {
                 "message": "Document rejected",
@@ -555,81 +577,3 @@ Please upload a corrected version of this document for re-verification.""",
             db.session.rollback()
             print(f"Error rejecting document: {str(e)}")
             return {"error": f"Failed to reject document: {str(e)}"}, 500
-
-class AdminApproveDocumentResource(Resource):
-    @auth_required
-    def put(self, document_id):
-        """Approve a single document"""
-        current_admin = current_user()
-        
-        if current_admin.role != 'admin':
-            return {"error": "Unauthorized"}, 403
-        
-        document = Document.query.get(document_id)
-        if not document:
-            return {"error": "Document not found"}, 404
-        
-        document.status = 'verified'
-        document.verified_by = current_admin.id
-        document.verified_at = datetime.now()
-        
-        # Check if all merchant documents are verified
-        merchant_docs = Document.query.filter_by(
-            user_id=document.user_id
-        ).all()
-        
-        all_verified = all(d.status == 'verified' for d in merchant_docs)
-        
-        if all_verified and len(merchant_docs) >= 3:
-            merchant = User.query.get(document.user_id)
-            if merchant:
-                merchant.kyc_status = 'verified'
-                merchant.verification_level = 'verified'
-                merchant.kyc_completed_on = datetime.now()
-        
-        db.session.commit()
-        
-        return {
-            "message": "Document approved successfully",
-            "document_id": document.document_id,
-            "status": "verified"
-        }, 200
-
-
-class AdminRejectDocumentResource(Resource):
-    @auth_required
-    def put(self, document_id):
-        """Reject a single document with reason"""
-        current_admin = current_user()
-        
-        if current_admin.role != 'admin':
-            return {"error": "Unauthorized"}, 403
-        
-        data = request.get_json()
-        rejection_reason = data.get('rejection_reason', '')
-        
-        if not rejection_reason:
-            return {"error": "Rejection reason is required"}, 400
-        
-        document = Document.query.get(document_id)
-        if not document:
-            return {"error": "Document not found"}, 404
-        
-        document.status = 'rejected'
-        document.rejection_reason = rejection_reason
-        document.verified_by = current_admin.id
-        document.verified_at = datetime.now()
-        
-        # Update merchant KYC status
-        merchant = User.query.get(document.user_id)
-        if merchant:
-            merchant.kyc_status = 'rejected'
-        
-        db.session.commit()
-        
-        return {
-            "message": "Document rejected",
-            "document_id": document.document_id,
-            "status": "rejected",
-            "rejection_reason": rejection_reason
-        }, 200
