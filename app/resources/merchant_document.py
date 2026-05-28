@@ -46,6 +46,33 @@ class MerchantGetDocumentsResource(Resource):
             } for d in documents]
         }, 200
 
+# resources/merchant_document.py
+from flask_restful import Resource, request
+from flask_praetorian import auth_required, current_user
+from ..models.user import User
+from ..models.document import Document
+from ..extensions import db
+from datetime import datetime
+import os
+import uuid
+import base64
+from pathlib import Path
+
+# Get the absolute path - fix this based on your project structure
+BASE_DIR = Path(__file__).resolve().parent.parent.parent  # Goes up to project root
+UPLOAD_FOLDER = BASE_DIR / 'uploads' / 'merchant_documents'
+
+# Ensure the directory exists
+UPLOAD_FOLDER.mkdir(parents=True, exist_ok=True)
+
+ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'webp', 'pdf'}
+MAX_FILE_SIZE = 5 * 1024 * 1024  # 5MB
+
+def allowed_file(filename):
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+def safe_str(v): return v if v is not None else ""
+
 
 class MerchantUploadDocumentsResource(Resource):
     @auth_required
@@ -65,8 +92,7 @@ class MerchantUploadDocumentsResource(Resource):
                 return {"error": f"Empty file for: {file_key}"}, 400
         
         # Create upload directory if not exists
-        if not os.path.exists(UPLOAD_FOLDER):
-            os.makedirs(UPLOAD_FOLDER)
+        UPLOAD_FOLDER.mkdir(parents=True, exist_ok=True)
         
         notes = request.form.get('notes', '')
         uploaded_documents = []
@@ -97,10 +123,10 @@ class MerchantUploadDocumentsResource(Resource):
             # Generate unique filename
             ext = file.filename.rsplit('.', 1)[1].lower()
             filename = f"{file_key}_{current_merchant.id}_{uuid.uuid4().hex}_{datetime.now().strftime('%Y%m%d%H%M%S')}.{ext}"
-            filepath = os.path.join(UPLOAD_FOLDER, filename)
+            filepath = UPLOAD_FOLDER / filename
             
             # Save file
-            file.save(filepath)
+            file.save(str(filepath))
             
             # Create document record
             document = Document(
@@ -108,9 +134,9 @@ class MerchantUploadDocumentsResource(Resource):
                 user_id=current_merchant.id,
                 document_type=config['type'],
                 document_name=config['name'],
-                file_path=filepath,
+                file_path=str(filepath),  # Store absolute path
                 file_name=filename,
-                file_size=os.path.getsize(filepath),
+                file_size=filepath.stat().st_size,
                 mime_type=file.content_type,
                 status='pending',
                 uploaded_by=current_merchant.id
@@ -128,11 +154,122 @@ class MerchantUploadDocumentsResource(Resource):
         
         db.session.commit()
         
+        # Debug: Print where files were saved
+        print(f"Files saved to: {UPLOAD_FOLDER}")
+        print(f"Directory exists: {UPLOAD_FOLDER.exists()}")
+        
         return {
             "message": "Documents uploaded successfully. Verification in progress.",
             "documents": uploaded_documents
         }, 201
 
+
+class AdminGetPendingKYCResource(Resource):
+    @auth_required
+    def get(self):
+        """Get all pending KYC/KYB verification requests"""
+        current_admin = current_user()
+        
+        if current_admin.role != 'admin':
+            return {"error": "Unauthorized"}, 403
+        
+        # Debug: Print the upload folder path
+        print(f"Looking for files in: {UPLOAD_FOLDER}")
+        print(f"Directory exists: {UPLOAD_FOLDER.exists()}")
+        
+        if UPLOAD_FOLDER.exists():
+            print(f"Files in directory: {list(UPLOAD_FOLDER.iterdir())}")
+        
+        # Get all merchants with pending KYC status
+        pending_merchants = User.query.filter(
+            User.role == 'merchant',
+            User.kyc_status.in_(['pending', 'submitted', 'not_submitted'])
+        ).all()
+        
+        result = []
+        for merchant in pending_merchants:
+            # Get all documents for this merchant
+            documents = Document.query.filter_by(
+                user_id=merchant.id
+            ).order_by(Document.created_at.desc()).all()
+            
+            # Check if any documents exist
+            if documents:
+                documents_data = []
+                for doc in documents:
+                    file_data = None
+                    
+                    # Debug: Print file path from database
+                    print(f"Document {doc.id} - DB file_path: {doc.file_path}")
+                    
+                    # Check if file exists at the stored path
+                    if doc.file_path and Path(doc.file_path).exists():
+                        print(f"File exists at: {doc.file_path}")
+                        try:
+                            with open(doc.file_path, 'rb') as f:
+                                file_data = base64.b64encode(f.read()).decode('utf-8')
+                                print(f"Successfully loaded file: {doc.file_name}, size: {len(file_data)} chars")
+                        except Exception as e:
+                            print(f"Error reading file: {str(e)}")
+                            file_data = None
+                    else:
+                        print(f"File NOT found at: {doc.file_path}")
+                        # Try to find the file by name in the upload folder
+                        if UPLOAD_FOLDER.exists():
+                            possible_file = UPLOAD_FOLDER / doc.file_name
+                            if possible_file.exists():
+                                print(f"Found file by name: {possible_file}")
+                                try:
+                                    with open(possible_file, 'rb') as f:
+                                        file_data = base64.b64encode(f.read()).decode('utf-8')
+                                        print(f"Successfully loaded file from name search")
+                                        # Update the document with correct path
+                                        doc.file_path = str(possible_file)
+                                        db.session.commit()
+                                except Exception as e:
+                                    print(f"Error reading found file: {str(e)}")
+                    
+                    documents_data.append({
+                        "id": doc.id,
+                        "document_id": doc.document_id,
+                        "document_name": doc.document_name,
+                        "document_type": doc.document_type,
+                        "status": doc.status,
+                        "uploaded_at": doc.created_at.isoformat() if doc.created_at else None,
+                        "file_data": file_data,
+                        "file_name": doc.file_name,
+                        "file_size": doc.file_size,
+                        "mime_type": doc.mime_type,
+                        "rejection_reason": doc.rejection_reason
+                    })
+                
+                result.append({
+                    "merchant_id": merchant.id,
+                    "merchant_name": merchant.business_name or merchant.full_name,
+                    "owner_name": merchant.owner_name,
+                    "phone": merchant.phone,
+                    "business_email": merchant.business_email or merchant.email,
+                    "city": merchant.city,
+                    "address": merchant.address,
+                    "kyc_status": merchant.kyc_status,
+                    "verification_level": merchant.verification_level or 'basic',
+                    "submitted_at": min([d.created_at for d in documents]).isoformat() if documents else None,
+                    "documents": documents_data,
+                    "bank_details": {
+                        "bank_name": merchant.bank_name,
+                        "account_name": merchant.account_name,
+                        "account_number": merchant.account_number,
+                        "branch_name": merchant.branch_name,
+                        "swift_code": merchant.swift_code,
+                        "momo_name": merchant.momo_name,
+                        "momo_number": merchant.momo_number
+                    }
+                })
+        
+        return {
+            "pending_verifications": result,
+            "total": len(result)
+        }, 200
 
 class MerchantGetKYCStatusResource(Resource):
     @auth_required
