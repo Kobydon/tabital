@@ -6,6 +6,7 @@ from ..extensions import db
 from datetime import datetime
 import os
 import base64
+# resources/admin_kyc.py - Update the get method
 
 class AdminGetPendingKYCResource(Resource):
     @auth_required
@@ -39,8 +40,12 @@ class AdminGetPendingKYCResource(Resource):
                         try:
                             with open(doc.file_path, 'rb') as f:
                                 file_data = base64.b64encode(f.read()).decode('utf-8')
-                        except:
+                                print(f"Loaded file: {doc.file_name}, size: {len(file_data)} chars")  # Debug log
+                        except Exception as e:
+                            print(f"Error reading file {doc.file_path}: {str(e)}")
                             file_data = None
+                    else:
+                        print(f"File not found: {doc.file_path}")
                     
                     documents_data.append({
                         "id": doc.id,
@@ -49,7 +54,7 @@ class AdminGetPendingKYCResource(Resource):
                         "document_type": doc.document_type,
                         "status": doc.status,
                         "uploaded_at": doc.created_at.isoformat() if doc.created_at else None,
-                        "file_data": file_data,
+                        "file_data": file_data,  # This should now have base64 data
                         "file_name": doc.file_name,
                         "file_size": doc.file_size,
                         "mime_type": doc.mime_type,
@@ -61,7 +66,7 @@ class AdminGetPendingKYCResource(Resource):
                     "merchant_name": merchant.business_name or merchant.full_name,
                     "owner_name": merchant.owner_name,
                     "phone": merchant.phone,
-                    "email": merchant.business_email or merchant.email,
+                    "business_email": merchant.business_email or merchant.email,
                     "city": merchant.city,
                     "address": merchant.address,
                     "kyc_status": merchant.kyc_status,
@@ -83,7 +88,6 @@ class AdminGetPendingKYCResource(Resource):
             "pending_verifications": result,
             "total": len(result)
         }, 200
-
 
 class AdminGetVerifiedKYCResource(Resource):
     @auth_required
@@ -156,7 +160,6 @@ class AdminGetRejectedKYCResource(Resource):
             "total": len(result)
         }, 200
 
-
 class AdminGetMerchantKYCResource(Resource):
     @auth_required
     def get(self, merchant_id):
@@ -181,7 +184,8 @@ class AdminGetMerchantKYCResource(Resource):
                 try:
                     with open(doc.file_path, 'rb') as f:
                         file_data = base64.b64encode(f.read()).decode('utf-8')
-                except:
+                except Exception as e:
+                    print(f"Error reading file: {str(e)}")
                     file_data = None
             
             documents_data.append({
