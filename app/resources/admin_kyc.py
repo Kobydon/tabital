@@ -8,37 +8,39 @@ import os
 import base64
 # resources/admin_kyc.py - Update the get method
 
-class AdminGetPendingMerchantKYCResource(Resource):
+class AdminGetPendingKYCResource(Resource):
     @auth_required
     def get(self):
-        """Admin gets all pending merchant KYC verification requests"""
+        """Get all pending KYC/KYB verification requests"""
         current_admin = current_user()
         
         if current_admin.role != 'admin':
             return {"error": "Unauthorized"}, 403
         
-        # Get merchants with pending KYC who have uploaded documents
+        # Get all merchants with pending KYC status
         pending_merchants = User.query.filter(
             User.role == 'merchant',
-            User.kyc_status == 'pending'
+            User.kyc_status.in_(['pending', 'submitted', 'not_submitted'])
         ).all()
         
         result = []
         for merchant in pending_merchants:
+            # Get all documents for this merchant
             documents = Document.query.filter_by(
                 user_id=merchant.id
-            ).all()
+            ).order_by(Document.created_at.desc()).all()
             
+            # Check if any documents exist
             if documents:
+                # Convert file paths to base64 for preview
                 documents_data = []
                 for doc in documents:
                     file_data = None
-                    # Read the file and convert to base64
                     if doc.file_path and os.path.exists(doc.file_path):
                         try:
                             with open(doc.file_path, 'rb') as f:
                                 file_data = base64.b64encode(f.read()).decode('utf-8')
-                                print(f"Loaded file: {doc.file_name}, size: {len(file_data)} chars")
+                                print(f"Loaded file: {doc.file_name}, size: {len(file_data)} chars")  # Debug log
                         except Exception as e:
                             print(f"Error reading file {doc.file_path}: {str(e)}")
                             file_data = None
@@ -51,8 +53,8 @@ class AdminGetPendingMerchantKYCResource(Resource):
                         "document_name": doc.document_name,
                         "document_type": doc.document_type,
                         "status": doc.status,
-                        "uploaded_at": doc.created_at.isoformat() if doc.created_at else "",
-                        "file_data": file_data,  # Now includes base64 data
+                        "uploaded_at": doc.created_at.isoformat() if doc.created_at else None,
+                        "file_data": file_data,  # This should now have base64 data
                         "file_name": doc.file_name,
                         "file_size": doc.file_size,
                         "mime_type": doc.mime_type,
@@ -157,6 +159,7 @@ class AdminGetRejectedKYCResource(Resource):
             "rejected_merchants": result,
             "total": len(result)
         }, 200
+
 class AdminGetMerchantKYCResource(Resource):
     @auth_required
     def get(self, merchant_id):
