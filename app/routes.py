@@ -275,6 +275,16 @@ from .resources.merchant_notifications import (
     MerchantDeleteNotificationResource,
     MerchantClearAllNotificationsResource
 )
+from resources.admin_kyc import (
+    AdminGetPendingKYCResource,
+    AdminGetVerifiedKYCResource,
+    AdminGetRejectedKYCResource,
+    AdminGetMerchantKYCResource,
+    AdminApproveKYCResource,
+    AdminRejectKYCResource,
+    AdminApproveDocumentResource,
+    AdminRejectDocumentResource
+)
 
 # In routes.py
 from .resources.customer_document import CustomerUploadOptionalDocumentResource
@@ -630,6 +640,18 @@ def register_routes(app):
     api.add_resource(ResetPasswordResource, "/reset-password")
     # In your main app file or routes file
     api.add_resource(CheckUserExistsResource, '/api/check-user-exists')
+    # Add these to your route registration
+
+
+# KYC/KYB Admin Routes
+    api.add_resource(AdminGetPendingKYCResource, '/admin/kyc/pending')
+    api.add_resource(AdminGetVerifiedKYCResource, '/admin/kyc/verified')
+    api.add_resource(AdminGetRejectedKYCResource, '/admin/kyc/rejected')
+    api.add_resource(AdminGetMerchantKYCResource, '/admin/kyc/merchant/<int:merchant_id>')
+    api.add_resource(AdminApproveKYCResource, '/admin/kyc/approve/<int:merchant_id>')
+    api.add_resource(AdminRejectKYCResource, '/admin/kyc/reject/<int:merchant_id>')
+    api.add_resource(AdminApproveDocumentResource, '/admin/kyc/document/approve/<int:document_id>')
+    api.add_resource(AdminRejectDocumentResource, '/admin/kyc/document/reject/<int:document_id>')
     
     # ... rest of your routes
 
