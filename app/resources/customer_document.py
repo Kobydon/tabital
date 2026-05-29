@@ -8,7 +8,7 @@ from datetime import datetime
 import json
 import os
 import uuid
-from werkzeug.utils import secure_filename
+import base64
 
 # Configuration
 UPLOAD_FOLDER = 'uploads/kyc'
@@ -30,7 +30,6 @@ class CustomerGetDocumentsResource(Resource):
         if current_customer.role != "customer":
             return {"error": "Unauthorized"}, 403
         
-        # Query using user_id (which can be customer_id)
         documents = Document.query.filter_by(
             user_id=current_customer.id
         ).order_by(Document.created_at.desc()).all()
@@ -52,259 +51,26 @@ class CustomerGetDocumentsResource(Resource):
 class CustomerUploadDocumentsResource(Resource):
     @auth_required
     def post(self):
-        """Upload KYC documents (front and back of Ghana Card)"""
-        current_customer = current_user()
-        
-        if current_customer.role != "customer":
-            return {"error": "Unauthorized"}, 403
-        
-        # Check if files are present
-        if 'front_image' not in request.files or 'back_image' not in request.files:
-            return {"error": "Both front and back images are required"}, 400
-        
-        front_image = request.files['front_image']
-        back_image = request.files['back_image']
-        notes = request.form.get('notes', '')
-        
-        # Validate files
-        if front_image.filename == '' or back_image.filename == '':
-            return {"error": "No file selected"}, 400
-        
-        if not allowed_file(front_image.filename) or not allowed_file(back_image.filename):
-            return {"error": f"File type not allowed. Allowed: {', '.join(ALLOWED_EXTENSIONS)}"}, 400
-        
-        # Create upload directory if not exists
-        if not os.path.exists(UPLOAD_FOLDER):
-            os.makedirs(UPLOAD_FOLDER)
-        
-        # Upload front image
-        front_ext = front_image.filename.rsplit('.', 1)[1].lower()
-        front_filename = f"front_{current_customer.customer_id}_{uuid.uuid4().hex}_{datetime.now().strftime('%Y%m%d%H%M%S')}.{front_ext}"
-        front_filepath = os.path.join(UPLOAD_FOLDER, front_filename)
-        front_image.save(front_filepath)
-        
-        # Create document record for front image using user_id
-        front_document = Document(
-            document_id=Document.generate_document_id(Document),
-            user_id=current_customer.id,  # Using user_id instead of merchant_id/customer_id
-            document_type='kyc_front',
-            document_name='Ghana Card (Front)',
-            file_path=front_filepath,
-            file_name=front_filename,
-            file_size=os.path.getsize(front_filepath),
-            mime_type=front_image.content_type,
-            status='pending',
-            uploaded_by=current_customer.id
-        )
-        db.session.add(front_document)
-        
-        # Upload back image
-        back_ext = back_image.filename.rsplit('.', 1)[1].lower()
-        back_filename = f"back_{current_customer.customer_id}_{uuid.uuid4().hex}_{datetime.now().strftime('%Y%m%d%H%M%S')}.{back_ext}"
-        back_filepath = os.path.join(UPLOAD_FOLDER, back_filename)
-        back_image.save(back_filepath)
-        
-        # Create document record for back image using user_id
-        back_document = Document(
-            document_id=Document.generate_document_id(Document),
-            user_id=current_customer.id,  # Using user_id instead of merchant_id/customer_id
-            document_type='kyc_back',
-            document_name='Ghana Card (Back)',
-            file_path=back_filepath,
-            file_name=back_filename,
-            file_size=os.path.getsize(back_filepath),
-            mime_type=back_image.content_type,
-            status='pending',
-            uploaded_by=current_customer.id
-        )
-        db.session.add(back_document)
-        
-        # Update customer KYC status
-        current_customer.kyc_status = 'pending'
-        
-        db.session.commit()
-        
-        return {
-            "message": "Documents uploaded successfully. Verification in progress.",
-            "documents": [
-                {
-                    "id": front_document.id,
-                    "document_id": front_document.document_id,
-                    "document_name": front_document.document_name,
-                    "status": front_document.status
-                },
-                {
-                    "id": back_document.id,
-                    "document_id": back_document.document_id,
-                    "document_name": back_document.document_name,
-                    "status": back_document.status
-                }
-            ]
-        }, 201
-
-
-class CustomerGetKYCStatusResource(Resource):
-    @auth_required
-    def get(self):
-        """Get customer's KYC verification status"""
-        current_customer = current_user()
-        
-        if current_customer.role != "customer":
-            return {"error": "Unauthorized"}, 403
-        
-        # Get latest KYC documents
-        kyc_documents = Document.query.filter_by(
-            user_id=current_customer.id
-        ).filter(
-            Document.document_type.in_(['kyc_front', 'kyc_back'])
-        ).all()
-        
-        # Determine overall KYC status
-        status = current_customer.kyc_status or 'not_submitted'
-        
-        # Check if any document is rejected
-        rejected_docs = [d for d in kyc_documents if d.status == 'rejected']
-        if rejected_docs:
-            status = 'rejected'
-            rejection_reason = rejected_docs[0].rejection_reason
-        else:
-            rejection_reason = None
-        
-        return {
-            "status": status,
-            "level": current_customer.verification_level or 'basic',
-            "submitted_at": min([d.created_at for d in kyc_documents]).isoformat() if kyc_documents else None,
-            "verified_at": current_customer.kyc_completed_on.isoformat() if current_customer.kyc_completed_on else None,
-            "rejection_reason": rejection_reason
-        }, 200
-
-
-class AdminVerifyDocumentResource(Resource):
-    @auth_required
-    def put(self, document_id):
-        """Admin verifies or rejects a document"""
-        current_admin = current_user()
-        
-        if current_admin.role != 'admin':
-            return {"error": "Unauthorized"}, 403
-        
-        document = Document.query.get(document_id)
-        if not document:
-            return {"error": "Document not found"}, 404
-        
-        data = request.get_json()
-        action = data.get('action')  # 'verify' or 'reject'
-        rejection_reason = data.get('rejection_reason', '')
-        
-        if action == 'verify':
-            document.status = 'verified'
-            document.verified_by = current_admin.id
-            document.verified_at = datetime.now()
-            
-            # Check if all customer documents are verified
-            customer_docs = Document.query.filter_by(
-                user_id=document.user_id
-            ).filter(
-                Document.document_type.in_(['kyc_front', 'kyc_back'])
-            ).all()
-            
-            all_verified = all(d.status == 'verified' for d in customer_docs)
-            
-            if all_verified:
-                customer = User.query.get(document.user_id)
-                if customer:
-                    customer.kyc_status = 'verified'
-                    customer.verification_level = 'verified'
-                    customer.kyc_completed_on = datetime.now()
-                    db.session.commit()
-        
-        elif action == 'reject':
-            document.status = 'rejected'
-            document.rejection_reason = rejection_reason
-            document.verified_by = current_admin.id
-            document.verified_at = datetime.now()
-            
-            # Update customer KYC status
-            customer = User.query.get(document.user_id)
-            if customer:
-                customer.kyc_status = 'rejected'
-            db.session.commit()
-        
-        else:
-            return {"error": "Invalid action. Use 'verify' or 'reject'"}, 400
-        
-        db.session.commit()
-        
-        return {
-            "message": f"Document {action}ed successfully",
-            "document_id": document.document_id,
-            "status": document.status
-        }, 200
-
-
-class AdminGetPendingKYCResource(Resource):
-    @auth_required
-    def get(self):
-        """Admin gets all pending KYC verification requests"""
-        current_admin = current_user()
-        
-        if current_admin.role != 'admin':
-            return {"error": "Unauthorized"}, 403
-        
-        # Get customers with pending KYC who have uploaded documents
-        pending_customers = User.query.filter(
-            User.role == 'customer',
-            User.kyc_status == 'pending'
-        ).all()
-        
-        result = []
-        for customer in pending_customers:
-            documents = Document.query.filter_by(
-                user_id=customer.id
-            ).filter(
-                Document.document_type.in_(['kyc_front', 'kyc_back'])
-            ).all()
-            
-            if documents:
-                result.append({
-                    "customer_id": customer.id,
-                    "customer_name": customer.full_name or customer.business_name,
-                    "customer_phone": customer.phone,
-                    "customer_email": customer.email,
-                    "documents": [{
-                        "id": d.id,
-                        "document_id": d.document_id,
-                        "document_name": d.document_name,
-                        "file_path": d.file_path,
-                        "status": d.status,
-                        "uploaded_at": d.created_at.isoformat() if d.created_at else ""
-                    } for d in documents]
-                })
-        
-        return {
-            "pending_verifications": result,
-            "total": len(result)
-        }, 200
-    
-
-    # resources/customer_document.py - Update CustomerUploadDocumentsResource
-
-class CustomerUploadDocumentsResource(Resource):
-    @auth_required
-    def post(self):
         """Upload KYC documents (Ghana Card, Salary Certificate, Bank Statement)"""
         current_customer = current_user()
         
         if current_customer.role != "customer":
             return {"error": "Unauthorized"}, 403
         
-        # Required files
+        # Debug: Log all received files
+        print(f"Received files: {list(request.files.keys())}")
+        print(f"Form data: {request.form}")
+        
+        # Required files - MUST MATCH FRONTEND KEYS
         required_files = ['front_image', 'back_image', 'salary_certificate', 'bank_statement']
         for file_key in required_files:
             if file_key not in request.files:
                 return {"error": f"Missing required file: {file_key}"}, 400
-            if request.files[file_key].filename == '':
+            file = request.files[file_key]
+            if file.filename == '':
                 return {"error": f"Empty file for: {file_key}"}, 400
+            print(f"File {file_key}: {file.filename}, size: {len(file.read()) if file else 0}")
+            file.seek(0)  # Reset file pointer after reading
         
         # Create upload directory if not exists
         if not os.path.exists(UPLOAD_FOLDER):
@@ -313,7 +79,7 @@ class CustomerUploadDocumentsResource(Resource):
         notes = request.form.get('notes', '')
         uploaded_documents = []
         
-        # Document configurations
+        # Document configurations - KEYS MUST MATCH FRONTEND
         doc_configs = {
             'front_image': {
                 'name': 'Ghana Card (Front)',
@@ -336,14 +102,20 @@ class CustomerUploadDocumentsResource(Resource):
         for file_key, config in doc_configs.items():
             file = request.files[file_key]
             
+            # Validate file type
             if not allowed_file(file.filename):
                 return {"error": f"File type not allowed for {config['name']}. Allowed: {', '.join(ALLOWED_EXTENSIONS)}"}, 400
             
+            # Generate unique filename
             ext = file.filename.rsplit('.', 1)[1].lower()
-            filename = f"{file_key}_{current_customer.customer_id}_{uuid.uuid4().hex}_{datetime.now().strftime('%Y%m%d%H%M%S')}.{ext}"
+            customer_id = current_customer.customer_id or f"C{current_customer.id:03d}"
+            filename = f"{file_key}_{customer_id}_{uuid.uuid4().hex}_{datetime.now().strftime('%Y%m%d%H%M%S')}.{ext}"
             filepath = os.path.join(UPLOAD_FOLDER, filename)
+            
+            # Save file
             file.save(filepath)
             
+            # Create document record
             document = Document(
                 document_id=Document.generate_document_id(Document),
                 user_id=current_customer.id,
@@ -373,9 +145,8 @@ class CustomerUploadDocumentsResource(Resource):
             "message": "Documents uploaded successfully. Verification in progress.",
             "documents": uploaded_documents
         }, 201
-    
 
-    # Add to customer_document.py
+
 class CustomerUploadOptionalDocumentResource(Resource):
     @auth_required
     def post(self):
@@ -402,7 +173,8 @@ class CustomerUploadOptionalDocumentResource(Resource):
             os.makedirs(UPLOAD_FOLDER)
         
         ext = file.filename.rsplit('.', 1)[1].lower()
-        filename = f"{document_type}_{current_customer.customer_id}_{uuid.uuid4().hex}_{datetime.now().strftime('%Y%m%d%H%M%S')}.{ext}"
+        customer_id = current_customer.customer_id or f"C{current_customer.id:03d}"
+        filename = f"{document_type}_{customer_id}_{uuid.uuid4().hex}_{datetime.now().strftime('%Y%m%d%H%M%S')}.{ext}"
         filepath = os.path.join(UPLOAD_FOLDER, filename)
         file.save(filepath)
         
@@ -430,3 +202,328 @@ class CustomerUploadOptionalDocumentResource(Resource):
                 "status": document.status
             }
         }, 201
+
+
+class CustomerGetKYCStatusResource(Resource):
+    @auth_required
+    def get(self):
+        """Get customer's KYC verification status"""
+        current_customer = current_user()
+        
+        if current_customer.role != "customer":
+            return {"error": "Unauthorized"}, 403
+        
+        # Get all KYC documents
+        kyc_documents = Document.query.filter_by(
+            user_id=current_customer.id
+        ).filter(
+            Document.document_type.in_(['kyc_front', 'kyc_back', 'salary_certificate', 'bank_statement'])
+        ).all()
+        
+        # Determine overall KYC status
+        status = current_customer.kyc_status or 'not_submitted'
+        
+        # Check if any document is rejected
+        rejected_docs = [d for d in kyc_documents if d.status == 'rejected']
+        if rejected_docs:
+            status = 'rejected'
+            rejection_reason = rejected_docs[0].rejection_reason
+        else:
+            rejection_reason = None
+        
+        # Check if all required documents are verified
+        required_types = ['kyc_front', 'kyc_back', 'salary_certificate', 'bank_statement']
+        existing_types = [d.document_type for d in kyc_documents]
+        all_required_present = all(t in existing_types for t in required_types)
+        
+        if all_required_present and all(d.status == 'verified' for d in kyc_documents if d.document_type in required_types):
+            status = 'verified'
+        
+        return {
+            "status": status,
+            "level": current_customer.verification_level or 'basic',
+            "submitted_at": min([d.created_at for d in kyc_documents]).isoformat() if kyc_documents else None,
+            "verified_at": current_customer.kyc_completed_on.isoformat() if current_customer.kyc_completed_on else None,
+            "rejection_reason": rejection_reason
+        }, 200
+
+
+# ============================================
+# ADMIN KYC MANAGEMENT RESOURCES
+# ============================================
+
+class AdminGetPendingCustomerKYCResource(Resource):
+    @auth_required
+    def get(self):
+        """Admin gets all pending customer KYC verification requests"""
+        current_admin = current_user()
+        
+        if current_admin.role != 'admin':
+            return {"error": "Unauthorized"}, 403
+        
+        # Get customers with pending KYC who have uploaded documents
+        pending_customers = User.query.filter(
+            User.role == 'customer',
+            User.kyc_status == 'pending'
+        ).all()
+        
+        result = []
+        for customer in pending_customers:
+            documents = Document.query.filter_by(
+                user_id=customer.id
+            ).order_by(Document.created_at.desc()).all()
+            
+            if documents:
+                # Convert file paths to base64 for preview
+                documents_data = []
+                for doc in documents:
+                    file_data = None
+                    if doc.file_path and os.path.exists(doc.file_path):
+                        try:
+                            with open(doc.file_path, 'rb') as f:
+                                file_data = base64.b64encode(f.read()).decode('utf-8')
+                        except Exception as e:
+                            print(f"Error reading file: {str(e)}")
+                    
+                    documents_data.append({
+                        "id": doc.id,
+                        "document_id": doc.document_id,
+                        "document_name": doc.document_name,
+                        "document_type": doc.document_type,
+                        "status": doc.status,
+                        "uploaded_at": doc.created_at.isoformat() if doc.created_at else None,
+                        "file_data": file_data,
+                        "file_name": doc.file_name,
+                        "file_size": doc.file_size,
+                        "mime_type": doc.mime_type,
+                        "rejection_reason": doc.rejection_reason
+                    })
+                
+                result.append({
+                    "customer_id": customer.id,
+                    "customer_name": customer.full_name or customer.business_name,
+                    "phone": customer.phone,
+                    "email": customer.business_email or customer.email,
+                    "kyc_status": customer.kyc_status,
+                    "submitted_at": min([d.created_at for d in documents]).isoformat() if documents else None,
+                    "documents": documents_data
+                })
+        
+        return {
+            "pending_verifications": result,
+            "total": len(result)
+        }, 200
+
+
+class AdminGetVerifiedCustomerKYCResource(Resource):
+    @auth_required
+    def get(self):
+        """Admin gets all verified customer KYC"""
+        current_admin = current_user()
+        
+        if current_admin.role != 'admin':
+            return {"error": "Unauthorized"}, 403
+        
+        verified_customers = User.query.filter(
+            User.role == 'customer',
+            User.kyc_status == 'verified'
+        ).all()
+        
+        result = []
+        for customer in verified_customers:
+            result.append({
+                "customer_id": customer.id,
+                "customer_name": customer.full_name or customer.business_name,
+                "phone": customer.phone,
+                "email": customer.business_email or customer.email,
+                "kyc_status": customer.kyc_status,
+                "verified_at": customer.kyc_completed_on.isoformat() if customer.kyc_completed_on else None,
+                "verification_level": customer.verification_level
+            })
+        
+        return {
+            "verified_customers": result,
+            "total": len(result)
+        }, 200
+
+
+class AdminGetRejectedCustomerKYCResource(Resource):
+    @auth_required
+    def get(self):
+        """Admin gets all rejected customer KYC"""
+        current_admin = current_user()
+        
+        if current_admin.role != 'admin':
+            return {"error": "Unauthorized"}, 403
+        
+        rejected_customers = User.query.filter(
+            User.role == 'customer',
+            User.kyc_status == 'rejected'
+        ).all()
+        
+        result = []
+        for customer in rejected_customers:
+            # Get rejection reason from documents
+            rejected_docs = Document.query.filter_by(
+                user_id=customer.id,
+                status='rejected'
+            ).first()
+            
+            result.append({
+                "customer_id": customer.id,
+                "customer_name": customer.full_name or customer.business_name,
+                "phone": customer.phone,
+                "email": customer.business_email or customer.email,
+                "kyc_status": customer.kyc_status,
+                "rejection_reason": rejected_docs.rejection_reason if rejected_docs else None,
+                "rejected_at": rejected_docs.verified_at.isoformat() if rejected_docs and rejected_docs.verified_at else None
+            })
+        
+        return {
+            "rejected_customers": result,
+            "total": len(result)
+        }, 200
+
+
+class AdminGetCustomerKYCDetailResource(Resource):
+    @auth_required
+    def get(self, customer_id):
+        """Admin gets specific customer's KYC details with file previews"""
+        current_admin = current_user()
+        
+        if current_admin.role != 'admin':
+            return {"error": "Unauthorized"}, 403
+        
+        customer = User.query.get(customer_id)
+        if not customer or customer.role != 'customer':
+            return {"error": "Customer not found"}, 404
+        
+        documents = Document.query.filter_by(
+            user_id=customer.id
+        ).order_by(Document.created_at.desc()).all()
+        
+        documents_data = []
+        for doc in documents:
+            file_data = None
+            if doc.file_path and os.path.exists(doc.file_path):
+                try:
+                    with open(doc.file_path, 'rb') as f:
+                        file_data = base64.b64encode(f.read()).decode('utf-8')
+                except Exception as e:
+                    print(f"Error reading file: {str(e)}")
+            
+            documents_data.append({
+                "id": doc.id,
+                "document_id": doc.document_id,
+                "document_name": doc.document_name,
+                "document_type": doc.document_type,
+                "status": doc.status,
+                "uploaded_at": doc.created_at.isoformat() if doc.created_at else None,
+                "file_data": file_data,
+                "file_name": doc.file_name,
+                "file_size": doc.file_size,
+                "mime_type": doc.mime_type,
+                "rejection_reason": doc.rejection_reason,
+                "verified_at": doc.verified_at.isoformat() if doc.verified_at else None,
+                "verified_by": doc.verified_by
+            })
+        
+        return {
+            "customer": {
+                "id": customer.id,
+                "full_name": customer.full_name,
+                "phone": customer.phone,
+                "email": customer.business_email or customer.email,
+                "kyc_status": customer.kyc_status,
+                "verification_level": customer.verification_level,
+                "kyc_completed_on": customer.kyc_completed_on.isoformat() if customer.kyc_completed_on else None
+            },
+            "documents": documents_data
+        }, 200
+
+
+class AdminApproveCustomerKYCResource(Resource):
+    @auth_required
+    def put(self, customer_id):
+        """Admin approves a customer's KYC verification"""
+        current_admin = current_user()
+        
+        if current_admin.role != 'admin':
+            return {"error": "Unauthorized"}, 403
+        
+        customer = User.query.get(customer_id)
+        if not customer or customer.role != 'customer':
+            return {"error": "Customer not found"}, 404
+        
+        try:
+            # Update all documents to verified
+            documents = Document.query.filter_by(user_id=customer.id).all()
+            for doc in documents:
+                doc.status = 'verified'
+                doc.verified_by = current_admin.id
+                doc.verified_at = datetime.now()
+            
+            # Update customer KYC status
+            customer.kyc_status = 'verified'
+            customer.verification_level = 'verified'
+            customer.kyc_completed_on = datetime.now()
+            customer.status = 'approved'  # Update user status to approved
+            
+            db.session.commit()
+            
+            return {
+                "message": "Customer KYC verification approved successfully",
+                "customer_id": customer.id,
+                "status": "verified"
+            }, 200
+            
+        except Exception as e:
+            db.session.rollback()
+            print(f"Error approving customer KYC: {str(e)}")
+            return {"error": f"Failed to approve KYC: {str(e)}"}, 500
+
+
+class AdminRejectCustomerKYCResource(Resource):
+    @auth_required
+    def put(self, customer_id):
+        """Admin rejects a customer's KYC verification"""
+        current_admin = current_user()
+        
+        if current_admin.role != 'admin':
+            return {"error": "Unauthorized"}, 403
+        
+        data = request.get_json()
+        rejection_reason = data.get('rejection_reason', '')
+        
+        if not rejection_reason:
+            return {"error": "Rejection reason is required"}, 400
+        
+        customer = User.query.get(customer_id)
+        if not customer or customer.role != 'customer':
+            return {"error": "Customer not found"}, 404
+        
+        try:
+            # Update all documents to rejected
+            documents = Document.query.filter_by(user_id=customer.id).all()
+            for doc in documents:
+                doc.status = 'rejected'
+                doc.rejection_reason = rejection_reason
+                doc.verified_by = current_admin.id
+                doc.verified_at = datetime.now()
+            
+            # Update customer KYC status
+            customer.kyc_status = 'rejected'
+            
+            db.session.commit()
+            
+            return {
+                "message": "Customer KYC verification rejected",
+                "customer_id": customer.id,
+                "status": "rejected",
+                "rejection_reason": rejection_reason
+            }, 200
+            
+        except Exception as e:
+            db.session.rollback()
+            print(f"Error rejecting customer KYC: {str(e)}")
+            return {"error": f"Failed to reject KYC: {str(e)}"}, 500
