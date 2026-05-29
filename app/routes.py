@@ -284,9 +284,18 @@ from .resources.admin_kyc import (
     AdminApproveDocumentResource,
     AdminRejectDocumentResource
 )
+from .resources.customer_document import (
+    AdminGetPendingCustomerKYCResource,
+    AdminGetVerifiedCustomerKYCResource,
+    AdminGetRejectedCustomerKYCResource,
+    AdminApproveCustomerKYCResource,
+    AdminRejectCustomerKYCResource,
+    AdminApproveCustomerDocumentResource,
+    AdminRejectCustomerDocumentResource
+)
 
 # In routes.py
-from .resources.customer_document import CustomerUploadOptionalDocumentResource
+# from .resources.customer_document import CustomerUploadOptionalDocumentResource
 
 # In register_routes function, add:
 
@@ -535,7 +544,7 @@ def register_routes(app):
     api.add_resource(MerchantProductDetailResource, "/merchant/products/<int:product_id>")
     api.add_resource(ProtectedResource, "/protected")
         
-    api.add_resource(CustomerUploadOptionalDocumentResource, "/customer/documents/upload-optional")
+    # api.add_resource(CustomerUploadOptionalDocumentResource, "/customer/documents/upload-optional")
     # Add to routes.py imports
 
 
@@ -654,6 +663,18 @@ def register_routes(app):
     api.add_resource(AdminRejectKYCResource, '/admin/kyc/reject/<int:merchant_id>')
     api.add_resource(AdminApproveDocumentResource, '/admin/kyc/document/approve/<int:document_id>')
     api.add_resource(AdminRejectDocumentResource, '/admin/kyc/document/reject/<int:document_id>')
+
+
+    # Add to your routes registration
+
+# Customer KYC Admin Routes
+    api.add_resource(AdminGetPendingCustomerKYCResource, '/admin/kyc/customers/pending')
+    api.add_resource(AdminGetVerifiedCustomerKYCResource, '/admin/kyc/customers/verified')
+    api.add_resource(AdminGetRejectedCustomerKYCResource, '/admin/kyc/customers/rejected')
+    api.add_resource(AdminApproveCustomerKYCResource, '/admin/kyc/customer/approve/<int:customer_id>')
+    api.add_resource(AdminRejectCustomerKYCResource, '/admin/kyc/customer/reject/<int:customer_id>')
+    api.add_resource(AdminApproveCustomerDocumentResource, '/admin/kyc/customer/document/approve/<int:document_id>')
+    api.add_resource(AdminRejectCustomerDocumentResource, '/admin/kyc/customer/document/reject/<int:document_id>')
     
     # ... rest of your routes
 
