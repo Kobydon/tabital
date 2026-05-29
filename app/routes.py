@@ -237,8 +237,8 @@ from .resources.customer_document import (
     CustomerGetDocumentsResource,
     CustomerUploadDocumentsResource,
     CustomerGetKYCStatusResource,
-    AdminVerifyDocumentResource,
-    AdminGetPendingKYCResource
+ 
+  
 )
 
 # routes.py - Add these imports and routes
@@ -591,7 +591,7 @@ def register_routes(app):
 # ADMIN DOCUMENT VERIFICATION ROUTES
 # ============================================
     # api.add_resource(AdminGetPendingKYCResource, "/admin/kyc/pending")
-    api.add_resource(AdminVerifyDocumentResource, "/admin/documents/<int:document_id>/verify")
+
     api.add_resource(MerchantGetDocumentsResource, "/merchant/documents")
     api.add_resource(MerchantUploadDocumentsResource, "/merchant/documents/upload")
     api.add_resource(MerchantGetKYCStatusResource, "/merchant/kyc/status")
