@@ -107,64 +107,54 @@ class CustomerGetKYCStatusResource(Resource):
             "verified_at": current_customer.kyc_completed_on.isoformat() if current_customer.kyc_status == 'verified' else None,
             "rejection_reason": None
         }
+# ============================================
+# CUSTOMER DOCUMENT UPLOAD
+# ============================================
 
+class CustomerUploadDocumentsResource(Resource):
 
-class CustomerUploadKYCResource(Resource):
     @auth_required
     def post(self):
-        """Upload KYC document"""
+
         current_customer = current_user()
-        
+
         if current_customer.role != "customer":
             return {"error": "Unauthorized"}, 403
-        
-        # In production, handle file upload to cloud storage
-        # For now, just update status
-        document_type = request.form.get('document_type')
-        
-        if not document_type:
-            return {"error": "Document type is required"}, 400
-        
-        # Update KYC status to pending if not already
-        if current_customer.kyc_status in [None, 'not_submitted', 'rejected']:
-            current_customer.kyc_status = 'pending'
-            db.session.commit()
-        
+
+        # DEBUGGING
+        print("Received files:", request.files)
+        print("Form data:", request.form)
+
+        # GET FILES
+        front_image = request.files.get('front_image')
+        back_image = request.files.get('back_image')
+        salary_certificate = request.files.get('salary_certificate' \
+        '')
+        bank_statement = request.files.get('bank_statement')
+
+        # OPTIONAL
+        notes = request.form.get('notes', '')
+
+        # VALIDATION
+        if not front_image:
+            return {"error": "Front Ghana Card image is required"}, 400
+
+        if not back_image:
+            return {"error": "Back Ghana Card image is required"}, 400
+
+        if not salary_certificate:
+            return {"error": "Salary certificate is required"}, 400
+
+        if not bank_statement:
+            return {"error": "Bank statement is required"}, 400
+
+        # UPDATE KYC STATUS
+        current_customer.kyc_status = 'pending'
+
+        db.session.commit()
+
         return {
-            "message": "Document uploaded successfully",
-            "document_type": document_type,
-            "status": "pending"
+            "message": "Documents uploaded successfully",
+            "status": "pending",
+            "notes": notes
         }, 200
-
-
-class CustomerGetActivityLogResource(Resource):
-    @auth_required
-    def get(self):
-        """Get customer activity log"""
-        current_customer = current_user()
-        
-        if current_customer.role != "customer":
-            return {"error": "Unauthorized"}, 403
-        
-        # You can create an ActivityLog model or return sample data
-        # For now, return sample activity logs
-        return {
-            "activities": [
-                {
-                    "id": 1,
-                    "action": "Login",
-                    "description": "Successful login",
-                    "ip_address": flask_request.remote_addr,
-                    "created_at": datetime.now().isoformat()
-                },
-                {
-                    "id": 2,
-                    "action": "Profile Update",
-                    "description": "Updated profile information",
-                    "ip_address": flask_request.remote_addr,
-                    "created_at": datetime.now().isoformat()
-                }
-            ]
-        }
-
-

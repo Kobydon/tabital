@@ -147,8 +147,7 @@ from .resources.customer_profile import (
     CustomerUpdateProfileResource,
     CustomerUpdatePasswordResource,
     CustomerGetKYCStatusResource,
-    CustomerUploadKYCResource,
-    CustomerGetActivityLogResource
+
 )
 
 from .resources.customer_notifications import (
@@ -477,8 +476,11 @@ def register_routes(app):
     api.add_resource(CustomerUpdateProfileResource, "/customer/profile")
     api.add_resource(CustomerUpdatePasswordResource, "/customer/password")
     api.add_resource(CustomerGetKYCStatusResource, "/customer/kyc/status")
-    api.add_resource(CustomerUploadKYCResource, "/customer/kyc/upload")
-    api.add_resource(CustomerGetActivityLogResource, "/customer/settings/activity-log")
+    api.add_resource(
+    CustomerUploadDocumentsResource,
+    '/customer/documents/upload'
+)
+    # api.add_resource(CustomerGetActivityLogResource, "/customer/settings/activity-log")
 
     # ============================================
     # CUSTOMER NOTIFICATION ROUTES
@@ -584,7 +586,7 @@ def register_routes(app):
     api.add_resource(CustomerPaidPaymentsResource, "/customer/paid-payments")
 
     api.add_resource(CustomerGetDocumentsResource, "/customer/documents")
-    api.add_resource(CustomerUploadDocumentsResource, "/customer/documents/upload")
+    # api.add_resource(CustomerUploadDocumentsResource, "/customer/documents/upload")f
     # api.add_resource(CustomerGetKYCStatusResource, "/customer/kyc/status")
 
 # ============================================
