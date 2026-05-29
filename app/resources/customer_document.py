@@ -251,6 +251,7 @@ class CustomerGetKYCStatusResource(Resource):
 # ============================================
 # ADMIN KYC MANAGEMENT RESOURCES
 # ============================================
+# resources/customer_document.py
 
 class AdminGetPendingCustomerKYCResource(Resource):
     @auth_required
@@ -274,16 +275,20 @@ class AdminGetPendingCustomerKYCResource(Resource):
             ).order_by(Document.created_at.desc()).all()
             
             if documents:
-                # Convert file paths to base64 for preview
                 documents_data = []
                 for doc in documents:
                     file_data = None
+                    # Read file and convert to base64
                     if doc.file_path and os.path.exists(doc.file_path):
                         try:
                             with open(doc.file_path, 'rb') as f:
                                 file_data = base64.b64encode(f.read()).decode('utf-8')
+                                print(f"Loaded customer document: {doc.file_name}, size: {len(file_data)} chars")
                         except Exception as e:
-                            print(f"Error reading file: {str(e)}")
+                            print(f"Error reading customer file {doc.file_path}: {str(e)}")
+                            file_data = None
+                    else:
+                        print(f"Customer file not found: {doc.file_path}")
                     
                     documents_data.append({
                         "id": doc.id,
@@ -292,11 +297,12 @@ class AdminGetPendingCustomerKYCResource(Resource):
                         "document_type": doc.document_type,
                         "status": doc.status,
                         "uploaded_at": doc.created_at.isoformat() if doc.created_at else None,
-                        "file_data": file_data,
+                        "file_data": file_data,  # This now includes base64 data
                         "file_name": doc.file_name,
                         "file_size": doc.file_size,
                         "mime_type": doc.mime_type,
-                        "rejection_reason": doc.rejection_reason
+                        "rejection_reason": doc.rejection_reason,
+                        "verified_at": doc.verified_at.isoformat() if doc.verified_at else None
                     })
                 
                 result.append({
@@ -305,6 +311,7 @@ class AdminGetPendingCustomerKYCResource(Resource):
                     "phone": customer.phone,
                     "email": customer.business_email or customer.email,
                     "kyc_status": customer.kyc_status,
+                    "verification_level": customer.verification_level or 'basic',
                     "submitted_at": min([d.created_at for d in documents]).isoformat() if documents else None,
                     "documents": documents_data
                 })
@@ -313,8 +320,6 @@ class AdminGetPendingCustomerKYCResource(Resource):
             "pending_verifications": result,
             "total": len(result)
         }, 200
-
-
 class AdminGetVerifiedCustomerKYCResource(Resource):
     @auth_required
     def get(self):
