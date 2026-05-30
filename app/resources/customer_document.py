@@ -35,7 +35,7 @@ class CustomerGetDocumentsResource(Resource):
         
         if current_customer.role != "customer":
             return {"error": "Unauthorized"}, 403
-        
+
         documents = Document.query.filter_by(
             user_id=current_customer.id
         ).order_by(Document.created_at.desc()).all()

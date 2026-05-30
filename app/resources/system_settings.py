@@ -99,96 +99,193 @@ class InstallmentOptionsResource(Resource):
         )
         
         return {"message": "Installment options updated successfully"}, 200
+from flask import request
+from flask_restful import Resource
+from flask_praetorian import auth_required, current_user
+from datetime import datetime, timedelta
 
 
 class InstallmentCalculatorResource(Resource):
+
     @auth_required
     def post(self):
-        """Calculate installment plan for a product using current system settings"""
+        """Calculate installment plan"""
+
         current_user_obj = current_user()
-        
-        data = request.get_json()
-        product_price = data.get('product_price')
-        number_of_installments = data.get('number_of_installments')
-        
-        if not product_price:
-            return {"error": "Product price is required"}, 400
-        
-        # Get current system settings
-        down_payment_percentage = float(SystemSetting.get_value("down_payment_percentage", 40))
-        merchant_fee_percentage = float(SystemSetting.get_value("merchant_fee_percentage", 10))
-        late_fee_percentage = float(SystemSetting.get_value("late_fee_percentage", 10))
-        service_fee = float(SystemSetting.get_value("service_fee", 0))
-        
-        if not number_of_installments:
-            number_of_installments = int(SystemSetting.get_value("default_installments", 4))
-        
-        min_installments = int(SystemSetting.get_value("min_installments", 2))
-        max_installments = int(SystemSetting.get_value("max_installments", 24))
-        
-        if number_of_installments < min_installments or number_of_installments > max_installments:
-            return {"error": f"Installments must be between {min_installments} and {max_installments}"}, 400
-        
-        # Calculate using Tabital formula
-        down_payment_amount = product_price * (down_payment_percentage / 100)
-        remaining_balance = product_price - down_payment_amount + service_fee
-        remaining_installments = number_of_installments - 1
-        installment_amount = remaining_balance / remaining_installments if remaining_installments > 0 else remaining_balance
-        
-        merchant_fee_amount = product_price * (merchant_fee_percentage / 100)
-        merchant_payout = product_price - merchant_fee_amount
-        total_payable = product_price + service_fee
-        
-        # Generate payment schedule
-        from datetime import datetime, timedelta
+
+        data = request.get_json() or {}
+
+        product_price = float(data.get('product_price', 0))
+        quantity = int(data.get('quantity', 1))
+        number_of_installments = int(data.get('number_of_installments', 1))
+
+        if product_price <= 0:
+            return {"error": "Valid product price is required"}, 400
+
+        # Product total
+        total_price = product_price * quantity
+
+        # System settings
+        merchant_fee_percentage = float(
+            SystemSetting.get_value("merchant_fee_percentage", 10)
+        )
+
+        late_fee_percentage = float(
+            SystemSetting.get_value("late_fee_percentage", 10)
+        )
+
+        service_fee = float(
+            SystemSetting.get_value("service_fee", 0)
+        )
+
+        delivery_fee = 50.0
+
+        # ==========================================
+        # DOWN PAYMENT RULES
+        # ==========================================
+
+        if number_of_installments == 1:
+            down_payment_percentage = 100
+
+        elif number_of_installments in [2, 3]:
+            down_payment_percentage = 50
+
+        elif number_of_installments == 4:
+            down_payment_percentage = 40
+
+        else:
+            return {
+                "error": "Only 1, 2, 3 and 4 installment plans are supported"
+            }, 400
+
+        # ==========================================
+        # CALCULATIONS
+        # ==========================================
+
+        product_down_payment = (
+            total_price * down_payment_percentage / 100
+        )
+
+        due_now_amount = (
+            product_down_payment + delivery_fee
+        )
+
+        remaining_balance = (
+            total_price - product_down_payment
+        )
+
+        remaining_installments = max(
+            number_of_installments - 1,
+            0
+        )
+
+        installment_amount = (
+            remaining_balance / remaining_installments
+            if remaining_installments > 0
+            else 0
+        )
+
+        merchant_fee_amount = (
+            total_price * merchant_fee_percentage / 100
+        )
+
+        merchant_payout = (
+            total_price - merchant_fee_amount
+        )
+
+        total_payable = (
+            total_price + delivery_fee + service_fee
+        )
+
+        # ==========================================
+        # PAYMENT SCHEDULE
+        # ==========================================
+
         payment_schedule = []
+
         current_date = datetime.now()
-        
-        # Down payment
+
+        # First payment
         payment_schedule.append({
             "installment_number": 1,
-            "amount": down_payment_amount,
+            "amount": round(due_now_amount, 2),
             "due_date": current_date.strftime("%Y-%m-%d"),
             "status": "due_now",
-            "description": "Down Payment (40% upfront)"
+            "description": f"{down_payment_percentage}% Down Payment + Delivery Fee"
         })
-        
-        # Remaining installments
+
+        # Remaining payments
         for i in range(1, remaining_installments + 1):
-            due_date = current_date + timedelta(days=30 * i)
+
+            due_date = current_date + timedelta(days=(30 * i))
+
+            if number_of_installments == 2:
+                description = "Final Payment (Remaining 50%)"
+
+            elif number_of_installments == 3:
+                description = f"Payment {i + 1} of 3 (25%)"
+
+            elif number_of_installments == 4:
+                description = f"Payment {i + 1} of 4 (20%)"
+
+            else:
+                description = f"Installment {i + 1}"
+
             payment_schedule.append({
                 "installment_number": i + 1,
-                "amount": installment_amount,
+                "amount": round(installment_amount, 2),
                 "due_date": due_date.strftime("%Y-%m-%d"),
                 "status": "pending",
-                "description": f"Installment {i + 1} of {number_of_installments}"
+                "description": description
             })
-        
+
         return {
-            "product_price": product_price,
+            "product_price": round(total_price, 2),
+
             "down_payment": {
                 "percentage": down_payment_percentage,
-                "amount": down_payment_amount
+                "amount": round(due_now_amount, 2)
             },
-            "remaining_balance": remaining_balance,
+
+            "remaining_balance": round(
+                remaining_balance,
+                2
+            ),
+
             "installment_details": {
                 "total_installments": number_of_installments,
                 "remaining_installments": remaining_installments,
-                "installment_amount": installment_amount
+                "installment_amount": round(
+                    installment_amount,
+                    2
+                )
             },
+
             "fees": {
                 "service_fee": service_fee,
+                "delivery_fee": delivery_fee,
                 "merchant_fee_percentage": merchant_fee_percentage,
-                "merchant_fee_amount": merchant_fee_amount,
+                "merchant_fee_amount": round(
+                    merchant_fee_amount,
+                    2
+                ),
                 "late_fee_percentage": late_fee_percentage
             },
-            "totals": {
-                "total_payable": total_payable,
-                "merchant_payout": merchant_payout
-            },
-            "payment_schedule": payment_schedule
-        }, 200
 
+            "totals": {
+                "total_payable": round(
+                    total_payable,
+                    2
+                ),
+                "merchant_payout": round(
+                    merchant_payout,
+                    2
+                )
+            },
+
+            "payment_schedule": payment_schedule
+
+        }, 200
 
 class LateFeeCalculatorResource(Resource):
     @auth_required
