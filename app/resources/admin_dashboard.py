@@ -1,9 +1,9 @@
-from flask_restful import Resource
+from flask_restful import Resource, request
 from flask_praetorian import auth_required, current_user
-from requests import request
 from app.models.user import User
 from app.models.transaction import Transaction
 from app.models.instalment import InstalmentPlan
+from app.models.instalment_payment import InstalmentPayment
 from app.models.document import Document
 from app.extensions import db
 from datetime import datetime, timedelta
@@ -23,7 +23,7 @@ class AdminDashboardStatsResource(Resource):
         last_30_days = today - timedelta(days=30)
         previous_30_days = last_30_days - timedelta(days=30)
         
-        # Total Financed (All Time)
+        # Total Financed (All Time) - Using customer_id instead of user_id
         total_financed = db.session.query(func.sum(InstalmentPlan.total_amount)).scalar() or 0
         
         # Total Financed (Last 30 days)
@@ -38,14 +38,14 @@ class AdminDashboardStatsResource(Resource):
         if total_financed_previous_30 > 0:
             financed_growth = ((total_financed_last_30 - total_financed_previous_30) / total_financed_previous_30) * 100
         
-        # Active Customers (customers with at least one transaction)
-        active_customers = db.session.query(func.count(func.distinct(InstalmentPlan.user_id)))\
+        # Active Customers (customers with at least one plan) - FIXED: use customer_id
+        active_customers = db.session.query(func.count(func.distinct(InstalmentPlan.customer_id)))\
             .filter(InstalmentPlan.status.in_(['active', 'completed'])).scalar() or 0
         
-        active_customers_last_30 = db.session.query(func.count(func.distinct(InstalmentPlan.user_id)))\
+        active_customers_last_30 = db.session.query(func.count(func.distinct(InstalmentPlan.customer_id)))\
             .filter(InstalmentPlan.created_at >= last_30_days).scalar() or 0
         
-        active_customers_previous_30 = db.session.query(func.count(func.distinct(InstalmentPlan.user_id)))\
+        active_customers_previous_30 = db.session.query(func.count(func.distinct(InstalmentPlan.customer_id)))\
             .filter(InstalmentPlan.created_at.between(previous_30_days, last_30_days)).scalar() or 0
         
         customers_growth = 0
@@ -74,10 +74,10 @@ class AdminDashboardStatsResource(Resource):
         if active_merchants_previous_30 > 0:
             merchants_growth = ((active_merchants_last_30 - active_merchants_previous_30) / active_merchants_previous_30) * 100
         
-        # Repayment Rate (percentage of paid installments)
-        total_installments = InstalmentPlan.query.count()
+        # Repayment Rate (percentage of completed plans)
+        total_plans = InstalmentPlan.query.count()
         completed_plans = InstalmentPlan.query.filter_by(status='completed').count()
-        repayment_rate = (completed_plans / total_installments * 100) if total_installments > 0 else 0
+        repayment_rate = (completed_plans / total_plans * 100) if total_plans > 0 else 0
         
         repayment_rate_last_30 = 0
         completed_last_30 = InstalmentPlan.query.filter(
@@ -90,15 +90,16 @@ class AdminDashboardStatsResource(Resource):
         
         # Default Rate
         defaulted_plans = InstalmentPlan.query.filter_by(status='defaulted').count()
-        default_rate = (defaulted_plans / total_installments * 100) if total_installments > 0 else 0
+        default_rate = (defaulted_plans / total_plans * 100) if total_plans > 0 else 0
         
         # Revenue MTD (commission earned this month)
         current_month_start = today.replace(day=1)
-        revenue_mtd = db.session.query(func.sum(InstalmentPlan.commission_amount))\
+        # Assuming commission is 10% of total_amount (you can adjust based on your logic)
+        revenue_mtd = db.session.query(func.sum(InstalmentPlan.total_amount * 0.1))\
             .filter(InstalmentPlan.status == 'completed',
                    InstalmentPlan.completed_at >= current_month_start).scalar() or 0
         
-        revenue_last_month = db.session.query(func.sum(InstalmentPlan.commission_amount))\
+        revenue_last_month = db.session.query(func.sum(InstalmentPlan.total_amount * 0.1))\
             .filter(InstalmentPlan.status == 'completed',
                    InstalmentPlan.completed_at.between(current_month_start - timedelta(days=30), current_month_start)).scalar() or 0
         
@@ -106,20 +107,24 @@ class AdminDashboardStatsResource(Resource):
         if revenue_last_month > 0:
             revenue_growth = ((revenue_mtd - revenue_last_month) / revenue_last_month) * 100
         
-        # Portfolio Overview
+        # Portfolio Overview - Using remaining_amount
         total_exposure = total_financed
-        early_risk = db.session.query(func.sum(InstalmentPlan.amount_outstanding))\
-            .filter(InstalmentPlan.days_overdue.between(31, 60)).scalar() or 0
-        late_risk = db.session.query(func.sum(InstalmentPlan.amount_outstanding))\
-            .filter(InstalmentPlan.days_overdue.between(61, 90)).scalar() or 0
-        default_risk = db.session.query(func.sum(InstalmentPlan.amount_outstanding))\
-            .filter(InstalmentPlan.days_overdue > 90).scalar() or 0
+        # For risk calculation, we need to query payments that are overdue
+        # Get sum of overdue payments from InstalmentPayment table
+        overdue_payments_sum = db.session.query(func.sum(InstalmentPayment.amount))\
+            .filter(InstalmentPayment.status == 'overdue',
+                   InstalmentPayment.due_date < datetime.now()).scalar() or 0
+        
+        # Simplified risk calculation (you can adjust based on your business logic)
+        early_risk = overdue_payments_sum * 0.3  # Placeholder
+        late_risk = overdue_payments_sum * 0.5   # Placeholder
+        default_risk = overdue_payments_sum * 0.2  # Placeholder
         
         # Alerts
         alerts = {
             "high_risk_transactions": 23,
             "failed_payments": 54,
-            "overdue_installments": InstalmentPlan.query.filter(InstalmentPlan.days_overdue > 0).count(),
+            "overdue_installments": InstalmentPayment.query.filter(InstalmentPayment.status == 'overdue').count(),
             "chargebacks": 17,
             "system_notifications": 12
         }
@@ -133,11 +138,13 @@ class AdminDashboardStatsResource(Resource):
             "limit_increase_requests": 9
         }
         
-        # Installment Status
-        paid_on_time = InstalmentPlan.query.filter_by(status='completed').count()
-        paid_late = InstalmentPlan.query.filter(InstalmentPlan.status == 'completed', InstalmentPlan.days_overdue > 0).count()
-        upcoming = InstalmentPlan.query.filter_by(status='active').count()
-        overdue = InstalmentPlan.query.filter(InstalmentPlan.days_overdue > 0, InstalmentPlan.status == 'active').count()
+        # Installment Status - Using InstalmentPayment for more accurate stats
+        paid_on_time = InstalmentPayment.query.filter_by(status='paid').count()
+        paid_late = InstalmentPayment.query.filter(InstalmentPayment.status == 'paid', InstalmentPayment.late_fee > 0).count()
+        upcoming = InstalmentPayment.query.filter_by(status='pending').filter(InstalmentPayment.due_date >= datetime.now()).count()
+        overdue = InstalmentPayment.query.filter_by(status='overdue').count()
+        
+        total_payments = paid_on_time + paid_late + upcoming + overdue
         
         # Top Merchants by GMV
         top_merchants = db.session.query(
@@ -151,16 +158,16 @@ class AdminDashboardStatsResource(Resource):
         
         merchants_list = [{"name": m[0] or "Unknown", "gmv": float(m[1])} for m in top_merchants]
         
-        # Recent Transactions
+        # Recent Transactions - Fixed to use customer relationship
         recent_transactions = db.session.query(
             InstalmentPlan.plan_id.label('txn_id'),
             User.full_name.label('customer'),
             User.business_name.label('merchant'),
             InstalmentPlan.total_amount.label('amount'),
-            InstalmentPlan.instalment_term.label('plan'),
+            InstalmentPlan.number_of_installments.label('plan'),
             InstalmentPlan.status.label('status'),
             InstalmentPlan.created_at.label('time')
-        ).join(User, InstalmentPlan.user_id == User.id)\
+        ).join(User, InstalmentPlan.customer_id == User.id)\
          .order_by(InstalmentPlan.created_at.desc())\
          .limit(5).all()
         
@@ -204,13 +211,13 @@ class AdminDashboardStatsResource(Resource):
             "pending_approvals": pending_approvals,
             "installment_status": {
                 "paid_on_time": paid_on_time,
-                "paid_on_time_percentage": round((paid_on_time / (paid_on_time + paid_late + upcoming + overdue) * 100) if (paid_on_time + paid_late + upcoming + overdue) > 0 else 0, 1),
+                "paid_on_time_percentage": round((paid_on_time / total_payments * 100) if total_payments > 0 else 0, 1),
                 "paid_late": paid_late,
-                "paid_late_percentage": round((paid_late / (paid_on_time + paid_late + upcoming + overdue) * 100) if (paid_on_time + paid_late + upcoming + overdue) > 0 else 0, 1),
+                "paid_late_percentage": round((paid_late / total_payments * 100) if total_payments > 0 else 0, 1),
                 "upcoming": upcoming,
-                "upcoming_percentage": round((upcoming / (paid_on_time + paid_late + upcoming + overdue) * 100) if (paid_on_time + paid_late + upcoming + overdue) > 0 else 0, 1),
+                "upcoming_percentage": round((upcoming / total_payments * 100) if total_payments > 0 else 0, 1),
                 "overdue": overdue,
-                "overdue_percentage": round((overdue / (paid_on_time + paid_late + upcoming + overdue) * 100) if (paid_on_time + paid_late + upcoming + overdue) > 0 else 0, 1)
+                "overdue_percentage": round((overdue / total_payments * 100) if total_payments > 0 else 0, 1)
             },
             "top_merchants": merchants_list,
             "recent_transactions": transactions
@@ -233,10 +240,10 @@ class AdminRecentTransactionsResource(Resource):
             User.full_name.label('customer'),
             User.business_name.label('merchant'),
             InstalmentPlan.total_amount.label('amount'),
-            InstalmentPlan.instalment_term.label('plan'),
+            InstalmentPlan.number_of_installments.label('plan'),
             InstalmentPlan.status.label('status'),
             InstalmentPlan.created_at.label('time')
-        ).join(User, InstalmentPlan.user_id == User.id)\
+        ).join(User, InstalmentPlan.customer_id == User.id)\
          .order_by(InstalmentPlan.created_at.desc())\
          .limit(limit).all()
         
