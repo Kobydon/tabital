@@ -118,6 +118,18 @@ from .resources.merchant_reports import (
     MerchantInstalmentReportResource,
     MerchantExportReportResource
 )
+# Add to your route registration
+from .resources.admin_customers import (
+    AdminCustomerStatsResource,
+    AdminGetCustomersResource,
+    AdminGetCustomerDetailResource,
+    AdminUpdateCustomerStatusResource,
+    AdminUpdateCustomerCreditLimitResource,
+    AdminAddCustomerNoteResource
+)
+
+# Customer Management Routes
+
 
 # Merchant Settings Resources
 from .resources.merchant_settings import (
@@ -681,5 +693,11 @@ def register_routes(app):
     
     api.add_resource(AdminDashboardStatsResource, '/admin/dashboard/stats')
     api.add_resource(AdminRecentTransactionsResource, '/admin/dashboard/transactions')
+    api.add_resource(AdminCustomerStatsResource, '/admin/customers/stats')
+    api.add_resource(AdminGetCustomersResource, '/admin/customers')
+    api.add_resource(AdminGetCustomerDetailResource, '/admin/customers/<int:customer_id>')
+    api.add_resource(AdminUpdateCustomerStatusResource, '/admin/customers/<int:customer_id>/status')
+    api.add_resource(AdminUpdateCustomerCreditLimitResource, '/admin/customers/<int:customer_id>/credit-limit')
+    api.add_resource(AdminAddCustomerNoteResource, '/admin/customers/<int:customer_id>/note')
     # ... rest of your routes
 
