@@ -86,7 +86,6 @@ class AdminCustomerStatsResource(Resource):
             "outstanding_growth": round(outstanding_growth, 1)
         }, 200
 
-
 class AdminGetCustomersResource(Resource):
     @auth_required
     def get(self):
@@ -101,7 +100,6 @@ class AdminGetCustomersResource(Resource):
         per_page = request.args.get('per_page', 20, type=int)
         search = request.args.get('search', '', type=str)
         kyc_status = request.args.get('kyc_status', '', type=str)
-        risk_level = request.args.get('risk_level', '', type=str)
         status = request.args.get('status', '', type=str)
         sort_by = request.args.get('sort_by', 'created_at', type=str)
         sort_order = request.args.get('sort_order', 'desc', type=str)
@@ -115,7 +113,7 @@ class AdminGetCustomersResource(Resource):
                 or_(
                     User.full_name.ilike(f'%{search}%'),
                     User.phone.ilike(f'%{search}%'),
-                    User.email.ilike(f'%{search}%'),
+                    User.business_email.ilike(f'%{search}%'),
                     User.customer_id.ilike(f'%{search}%')
                 )
             )
@@ -139,11 +137,11 @@ class AdminGetCustomersResource(Resource):
         
         customers = []
         for customer in paginated.items:
-            # Calculate customer metrics
+            # Calculate financial metrics
             total_financed = db.session.query(func.sum(InstalmentPlan.total_amount))\
                 .filter(InstalmentPlan.customer_id == customer.id).scalar() or 0
             
-            total_paid = db.session.query(func.sum(InstalmentPlan.total_amount - InstalmentPlan.remaining_amount))\
+            total_paid = db.session.query(func.sum(InstalmentPlan.amount_paid))\
                 .filter(InstalmentPlan.customer_id == customer.id).scalar() or 0
             
             outstanding = db.session.query(func.sum(InstalmentPlan.remaining_amount))\
@@ -154,17 +152,17 @@ class AdminGetCustomersResource(Resource):
                 status='active'
             ).count()
             
-            # Determine risk level based on repayment behavior
-            risk_level_calc = "Low"
-            if outstanding > 1000 or active_plans > 3:
-                risk_level_calc = "Medium"
+            # Determine risk level based on customer data
+            risk_level = "Low"
+            if outstanding > 1000 or active_plans > 2:
+                risk_level = "Medium"
             if outstanding > 2000 or customer.kyc_status == 'rejected':
-                risk_level_calc = "High"
+                risk_level = "High"
             
-            # Determine credit limit based on income and history
+            # Determine credit limit based on income range
             credit_limit = 500
             if customer.income_range:
-                if "5,000" in customer.income_range:
+                if "5,000+" in customer.income_range:
                     credit_limit = 5000
                 elif "3,000" in customer.income_range:
                     credit_limit = 3000
@@ -175,15 +173,15 @@ class AdminGetCustomersResource(Resource):
             
             customers.append({
                 "id": customer.id,
-                "customer_id": customer.customer_id or f"C{customer.id:03d}",
+                "customer_id": customer.customer_id or f"C{customer.id:04d}",
                 "full_name": customer.full_name or "N/A",
                 "phone": customer.phone,
                 "email": customer.business_email or customer.email or "N/A",
                 "kyc_status": customer.kyc_status or "pending",
-                "risk_level": risk_level_calc,
+                "risk_level": risk_level,
                 "credit_limit": credit_limit,
                 "outstanding": float(outstanding),
-                "status": customer.status,
+                "status": customer.status if customer.status in ['active', 'approved'] else 'pending',
                 "total_financed": float(total_financed),
                 "total_paid": float(total_paid),
                 "active_plans": active_plans,
@@ -195,7 +193,82 @@ class AdminGetCustomersResource(Resource):
             "total": paginated.total,
             "page": page,
             "per_page": per_page,
-            "total_pages": paginated.pages
+            "total_pages": paginated.pages if paginated.pages > 0 else 1
+        }, 200
+
+
+class AdminCustomerStatsResource(Resource):
+    @auth_required
+    def get(self):
+        """Get customer overview statistics"""
+        current_admin = current_user()
+        
+        if current_admin.role != 'admin':
+            return {"error": "Unauthorized"}, 403
+        
+        # Date calculations
+        today = datetime.now().date()
+        last_30_days = today - timedelta(days=30)
+        
+        # Total Customers
+        total_customers = User.query.filter(User.role == 'customer').count()
+        
+        # Active Customers (status approved or active)
+        active_customers = User.query.filter(
+            User.role == 'customer',
+            User.status.in_(['approved', 'active'])
+        ).count()
+        
+        # New Customers (last 30 days)
+        new_customers = User.query.filter(
+            User.role == 'customer',
+            User.created_at >= last_30_days
+        ).count()
+        
+        # Calculate active customers growth
+        active_customers_last_30 = User.query.filter(
+            User.role == 'customer',
+            User.status.in_(['approved', 'active']),
+            User.created_at >= last_30_days
+        ).count()
+        active_customers_previous = active_customers - active_customers_last_30
+        active_customers_growth = ((active_customers_last_30 - active_customers_previous) / active_customers_previous * 100) if active_customers_previous > 0 else 0
+        
+        # Calculate new customers growth
+        new_customers_previous = User.query.filter(
+            User.role == 'customer',
+            User.created_at < last_30_days
+        ).count()
+        new_customers_growth = ((new_customers - new_customers_previous) / new_customers_previous * 100) if new_customers_previous > 0 else 0
+        
+        # Repeat Purchase Rate
+        customers_with_multiple_plans = db.session.query(
+            InstalmentPlan.customer_id
+        ).filter(
+            InstalmentPlan.customer_id.isnot(None)
+        ).group_by(InstalmentPlan.customer_id).having(func.count(InstalmentPlan.id) > 1).count()
+        repeat_purchase_rate = (customers_with_multiple_plans / total_customers * 100) if total_customers > 0 else 0
+        
+        # Total Outstanding
+        total_outstanding = db.session.query(func.sum(InstalmentPlan.remaining_amount))\
+            .filter(InstalmentPlan.status == 'active').scalar() or 0
+        
+        # Calculate outstanding growth
+        total_outstanding_last_30 = db.session.query(func.sum(InstalmentPlan.remaining_amount))\
+            .filter(InstalmentPlan.status == 'active', InstalmentPlan.created_at >= last_30_days).scalar() or 0
+        total_outstanding_previous = total_outstanding - total_outstanding_last_30
+        outstanding_growth = ((total_outstanding_last_30 - total_outstanding_previous) / total_outstanding_previous * 100) if total_outstanding_previous > 0 else 0
+        
+        return {
+            "total_customers": total_customers,
+            "active_customers": active_customers,
+            "active_customers_growth": round(active_customers_growth, 1),
+            "new_customers": new_customers,
+            "new_customers_growth": round(new_customers_growth, 1),
+            "repeat_purchase_rate": round(repeat_purchase_rate, 1),
+            "repeat_purchase_rate_growth": 5.2,
+            "total_outstanding": float(total_outstanding),
+            "outstanding_growth": round(outstanding_growth, 1)
         }, 200
 
 
