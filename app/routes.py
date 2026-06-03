@@ -128,7 +128,22 @@ from .resources.admin_customers import (
     AdminAddCustomerNoteResource
 )
 
-# Customer Management Routes
+# In your routes.py or app.py file
+
+from .resources.admin_merchants import (
+    AdminMerchantStatsResource,
+    AdminGetMerchantsResource,
+    AdminGetMerchantDetailResource,
+    AdminUpdateMerchantStatusResource,
+    AdminUpdateMerchantCommissionResource,
+    AdminAdjustMerchantReserveResource
+)
+
+# ============================================
+# ADMIN MERCHANT MANAGEMENT ROUTES
+# ============================================
+
+
 
 
 # Merchant Settings Resources
@@ -699,5 +714,25 @@ def register_routes(app):
     api.add_resource(AdminUpdateCustomerStatusResource, '/admin/customers/<int:customer_id>/status')
     api.add_resource(AdminUpdateCustomerCreditLimitResource, '/admin/customers/<int:customer_id>/credit-limit')
     api.add_resource(AdminAddCustomerNoteResource, '/admin/customers/<int:customer_id>/note')
+
+
+    # Merchant Statistics
+    api.add_resource(AdminMerchantStatsResource, '/admin/merchants/stats')
+
+    # Get all merchants (with filters, search, pagination)
+    api.add_resource(AdminGetMerchantsResource, '/admin/merchants')
+
+    # Get single merchant details
+    api.add_resource(AdminGetMerchantDetailResource, '/admin/merchants/<int:merchant_id>')
+
+    # Update merchant status
+    api.add_resource(AdminUpdateMerchantStatusResource, '/admin/merchants/<int:merchant_id>/status')
+
+    # Update merchant commission rate
+    api.add_resource(AdminUpdateMerchantCommissionResource, '/admin/merchants/<int:merchant_id>/commission')
+
+    # Adjust merchant reserve amount
+    api.add_resource(AdminAdjustMerchantReserveResource, '/admin/merchants/<int:merchant_id>/reserve')
+# Customer Management Routes
     # ... rest of your routes
 
