@@ -324,6 +324,17 @@ from .resources.customer_document import (
     AdminRejectCustomerDocumentResource
 )
 
+from app.resources.admin_transactions import (
+    AdminTransactionStatsResource,
+    AdminGetTransactionsResource,
+    AdminGetTransactionDetailResource,
+    AdminUpdateTransactionStatusResource,
+    AdminUpdateDeliveryStatusResource,
+    AdminRefundTransactionResource,
+    AdminExportTransactionsResource
+)
+
+
 # In routes.py
 # from .resources.customer_document import CustomerUploadOptionalDocumentResource
 
@@ -736,3 +747,12 @@ def register_routes(app):
 # Customer Management Routes
     # ... rest of your routes
 
+
+# Transaction Management Routes
+    api.add_resource(AdminTransactionStatsResource, '/admin/transactions/stats')
+    api.add_resource(AdminGetTransactionsResource, '/admin/transactions')
+    api.add_resource(AdminGetTransactionDetailResource, '/admin/transactions/<int:transaction_id>')
+    api.add_resource(AdminUpdateTransactionStatusResource, '/admin/transactions/<int:transaction_id>/status')
+    api.add_resource(AdminUpdateDeliveryStatusResource, '/admin/transactions/<int:transaction_id>/delivery')
+    api.add_resource(AdminRefundTransactionResource, '/admin/transactions/<int:transaction_id>/refund')
+    api.add_resource(AdminExportTransactionsResource, '/admin/transactions/export')
