@@ -105,6 +105,9 @@ from .resources.merchant_disputes import (
     MerchantRejectDisputeResource,
     MerchantEscalateDisputeResource
 )
+# Add to your route registration
+from .resources.admin_dashboard import AdminDashboardStatsResource, AdminRecentTransactionsResource
+
 
 # Merchant Reports Resources
 from .resources.merchant_reports import (
@@ -676,5 +679,7 @@ def register_routes(app):
     api.add_resource(AdminApproveCustomerDocumentResource, '/admin/kyc/customer/document/approve/<int:document_id>')
     api.add_resource(AdminRejectCustomerDocumentResource, '/admin/kyc/customer/document/reject/<int:document_id>')
     
+    api.add_resource(AdminDashboardStatsResource, '/admin/dashboard/stats')
+    api.add_resource(AdminRecentTransactionsResource, '/admin/dashboard/transactions')
     # ... rest of your routes
 
