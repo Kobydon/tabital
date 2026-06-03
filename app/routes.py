@@ -334,6 +334,19 @@ from app.resources.admin_transactions import (
     AdminExportTransactionsResource
 )
 
+from app.resources.admin_instalments import (
+    AdminInstalmentStatsResource,
+    AdminGetInstalmentPlansResource,
+    AdminGetInstalmentPlanDetailResource,
+    AdminUpdateInstalmentStatusResource,
+    AdminApplyLateFeeResource,
+    AdminWaiveLateFeeResource,
+    AdminMarkPaymentAsPaidResource,
+    AdminExportInstalmentsResource
+)
+
+# Instalment Management Routes
+
 
 # In routes.py
 # from .resources.customer_document import CustomerUploadOptionalDocumentResource
@@ -756,3 +769,13 @@ def register_routes(app):
     api.add_resource(AdminUpdateDeliveryStatusResource, '/admin/transactions/<int:transaction_id>/delivery')
     api.add_resource(AdminRefundTransactionResource, '/admin/transactions/<int:transaction_id>/refund')
     api.add_resource(AdminExportTransactionsResource, '/admin/transactions/export')
+
+# Instalment Management Routes
+    api.add_resource(AdminInstalmentStatsResource, '/admin/instalments/stats')
+    api.add_resource(AdminGetInstalmentPlansResource, '/admin/instalments')
+    api.add_resource(AdminGetInstalmentPlanDetailResource, '/admin/instalments/<int:plan_id>')
+    api.add_resource(AdminUpdateInstalmentStatusResource, '/admin/instalments/<int:plan_id>/status')
+    api.add_resource(AdminApplyLateFeeResource, '/admin/instalments/payments/<int:payment_id>/apply-late-fee')
+    api.add_resource(AdminWaiveLateFeeResource, '/admin/instalments/payments/<int:payment_id>/waive-late-fee')
+    api.add_resource(AdminMarkPaymentAsPaidResource, '/admin/instalments/payments/<int:payment_id>/mark-paid')
+    api.add_resource(AdminExportInstalmentsResource, '/admin/instalments/export')
