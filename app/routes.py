@@ -345,6 +345,15 @@ from app.resources.admin_instalments import (
     AdminExportInstalmentsResource
 )
 
+from app.resources.admin_collection import (
+    AdminCollectionStatsResource,
+    AdminGetOverduePaymentsResource,
+    AdminGetOverduePaymentDetailResource,
+    AdminSendPaymentReminderResource,
+    AdminMarkPaymentReceivedResource,
+    AdminSetPaymentPlanResource,
+    AdminExportOverduePaymentsResource
+)
 # Instalment Management Routes
 
 
@@ -779,3 +788,13 @@ def register_routes(app):
     api.add_resource(AdminWaiveLateFeeResource, '/admin/instalments/payments/<int:payment_id>/waive-late-fee')
     api.add_resource(AdminMarkPaymentAsPaidResource, '/admin/instalments/payments/<int:payment_id>/mark-paid')
     api.add_resource(AdminExportInstalmentsResource, '/admin/instalments/export')
+    
+
+# Collection Management Routes
+    api.add_resource(AdminCollectionStatsResource, '/admin/collection/stats')
+    api.add_resource(AdminGetOverduePaymentsResource, '/admin/collection/overdue')
+    api.add_resource(AdminGetOverduePaymentDetailResource, '/admin/collection/overdue/<int:payment_id>')
+    api.add_resource(AdminSendPaymentReminderResource, '/admin/collection/<int:payment_id>/reminder')
+    api.add_resource(AdminMarkPaymentReceivedResource, '/admin/collection/<int:payment_id>/mark-received')
+    api.add_resource(AdminSetPaymentPlanResource, '/admin/collection/<int:payment_id>/payment-plan')
+    api.add_resource(AdminExportOverduePaymentsResource, '/admin/collection/export')
