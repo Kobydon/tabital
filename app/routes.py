@@ -179,7 +179,14 @@ from .resources.customer_profile import (
     CustomerGetKYCStatusResource,
 
 )
-
+from .resources.admin_settlements import (
+    AdminSettlementStatsResource,
+    AdminGetSettlementsResource,
+    AdminGetSettlementDetailResource,
+    AdminProcessSettlementResource,
+    AdminProcessSingleSettlementResource,
+    AdminExportSettlementsResource
+)
 from .resources.customer_notifications import (
     CustomerGetNotificationsResource,
     CustomerMarkNotificationReadResource,
@@ -798,3 +805,12 @@ def register_routes(app):
     api.add_resource(AdminMarkPaymentReceivedResource, '/admin/collection/<int:payment_id>/mark-received')
     api.add_resource(AdminSetPaymentPlanResource, '/admin/collection/<int:payment_id>/payment-plan')
     api.add_resource(AdminExportOverduePaymentsResource, '/admin/collection/export')
+
+
+# Settlement Management Routes
+    api.add_resource(AdminSettlementStatsResource, '/admin/settlements/stats')
+    api.add_resource(AdminGetSettlementsResource, '/admin/settlements')
+    api.add_resource(AdminGetSettlementDetailResource, '/admin/settlements/<int:settlement_id>')
+    api.add_resource(AdminProcessSettlementResource, '/admin/settlements/process-bulk')
+    api.add_resource(AdminProcessSingleSettlementResource, '/admin/settlements/<int:settlement_id>/process')
+    api.add_resource(AdminExportSettlementsResource, '/admin/settlements/export')
