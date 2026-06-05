@@ -187,6 +187,18 @@ from .resources.admin_settlements import (
     AdminProcessSingleSettlementResource,
     AdminExportSettlementsResource
 )
+from app.resources.admin_reports import (
+    AdminReportRevenueResource,
+    AdminReportTransactionsResource,
+    AdminReportCustomersResource,
+    AdminReportMerchantsResource,
+    AdminReportInstalmentsResource,
+    AdminReportDownloadResource,
+    AdminDashboardKPIResource
+)
+
+# Reports & Analytics Routes
+
 from .resources.customer_notifications import (
     CustomerGetNotificationsResource,
     CustomerMarkNotificationReadResource,
@@ -814,3 +826,10 @@ def register_routes(app):
     api.add_resource(AdminProcessSettlementResource, '/admin/settlements/process-bulk')
     api.add_resource(AdminProcessSingleSettlementResource, '/admin/settlements/<int:settlement_id>/process')
     api.add_resource(AdminExportSettlementsResource, '/admin/settlements/export')
+    api.add_resource(AdminReportRevenueResource, '/admin/reports/revenue')
+    api.add_resource(AdminReportTransactionsResource, '/admin/reports/transactions')
+    api.add_resource(AdminReportCustomersResource, '/admin/reports/customers')
+    api.add_resource(AdminReportMerchantsResource, '/admin/reports/merchants')
+    api.add_resource(AdminReportInstalmentsResource, '/admin/reports/instalments')
+    api.add_resource(AdminReportDownloadResource, '/admin/reports/download')
+    api.add_resource(AdminDashboardKPIResource, '/admin/reports/kpis')
