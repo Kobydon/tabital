@@ -13,3 +13,4 @@ flask_mail
 flask_restful
 gunicorn
 requests
+openpyxl
