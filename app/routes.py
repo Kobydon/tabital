@@ -22,6 +22,17 @@ from .resources.admin import (
     GetCurrentUserResource,
      AdminApproveOrderResource,
 )
+from app.resources.admin_product_plans import (
+    AdminProductStatsResource,
+    AdminGetProductsResource,
+    AdminGetProductDetailResource,
+    AdminUpdateProductStatusResource,
+    AdminUpdateProductFeaturedResource,
+    AdminUpdateProductStockResource,
+    AdminExportProductsResource
+)
+
+# Product Plans Routes
 
 # Transaction Resources
 from .resources.transaction import (
@@ -833,3 +844,10 @@ def register_routes(app):
     api.add_resource(AdminReportInstalmentsResource, '/admin/reports/instalments')
     api.add_resource(AdminReportDownloadResource, '/admin/reports/download')
     api.add_resource(AdminDashboardKPIResource, '/admin/reports/kpis')
+    api.add_resource(AdminProductStatsResource, '/admin/products/stats')
+    api.add_resource(AdminGetProductsResource, '/admin/products')
+    api.add_resource(AdminGetProductDetailResource, '/admin/products/<int:product_id>')
+    api.add_resource(AdminUpdateProductStatusResource, '/admin/products/<int:product_id>/status')
+    api.add_resource(AdminUpdateProductFeaturedResource, '/admin/products/<int:product_id>/featured')
+    api.add_resource(AdminUpdateProductStockResource, '/admin/products/<int:product_id>/stock')
+    api.add_resource(AdminExportProductsResource, '/admin/products/export')
