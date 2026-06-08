@@ -870,3 +870,5 @@ def register_routes(app):
     api.add_resource(AdminUpdateUserStatusResource, '/admin/users/<int:user_id>/status')
     api.add_resource(AdminDeleteUserResource, '/admin/users/<int:user_id>')
     api.add_resource(AdminExportUsersResource, '/admin/users/export')
+    api.add_resource(SystemSettingsResource, '/api/system-settings')
+    api.add_resource(InstallmentOptionsResource, '/api/system-settings/installment-options')
