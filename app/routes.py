@@ -22,6 +22,16 @@ from .resources.admin import (
     GetCurrentUserResource,
      AdminApproveOrderResource,
 )
+
+from app.resources.admin_users import (
+    AdminUserStatsResource,
+    AdminGetAllUsersResource,
+    AdminGetUserDetailResource,
+    AdminUpdateUserStatusResource,
+    AdminDeleteUserResource,
+    AdminExportUsersResource
+)
+
 from app.resources.admin_product_plans import (
     AdminProductStatsResource,
     AdminGetProductsResource,
@@ -851,3 +861,12 @@ def register_routes(app):
     api.add_resource(AdminUpdateProductFeaturedResource, '/admin/products/<int:product_id>/featured')
     api.add_resource(AdminUpdateProductStockResource, '/admin/products/<int:product_id>/stock')
     api.add_resource(AdminExportProductsResource, '/admin/products/export')
+   
+
+# User Management Routes
+    api.add_resource(AdminUserStatsResource, '/admin/users/stats')
+    api.add_resource(AdminGetAllUsersResource, '/admin/users')
+    api.add_resource(AdminGetUserDetailResource, '/admin/users/<int:user_id>')
+    api.add_resource(AdminUpdateUserStatusResource, '/admin/users/<int:user_id>/status')
+    api.add_resource(AdminDeleteUserResource, '/admin/users/<int:user_id>')
+    api.add_resource(AdminExportUsersResource, '/admin/users/export')
