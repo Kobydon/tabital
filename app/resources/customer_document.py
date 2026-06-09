@@ -9,23 +9,67 @@ import json
 import os
 import uuid
 import base64
-
-# Configuration
 from pathlib import Path
 
-# Make sure the upload folder path is correct
-# Try multiple possible paths to find the files
-UPLOAD_FOLDER = Path('uploads/kyc')
-ALT_UPLOAD_FOLDER = Path('/app/uploads/kyc')  # For Docker
+# ============================================
+# CONFIGURATION
+# ============================================
+
+# Get absolute base directory
+BASE_DIR = Path(__file__).resolve().parent.parent.parent
+
+# Define upload folders with absolute paths
+UPLOAD_FOLDER = BASE_DIR / 'uploads' / 'kyc'
+ALT_UPLOAD_FOLDER = Path('/app/uploads/kyc')
 CWD_UPLOAD_FOLDER = Path.cwd() / 'uploads' / 'kyc'
+
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'webp', 'pdf'}
 MAX_FILE_SIZE = 5 * 1024 * 1024  # 5MB
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
-def safe_str(v): return v if v is not None else ""
+def safe_str(v): 
+    return v if v is not None else ""
 
+def find_file_and_load_base64(file_name):
+    """Helper function to find and load file from multiple possible locations"""
+    if not file_name:
+        return None
+    
+    # List of possible paths to check
+    possible_paths = [
+        str(UPLOAD_FOLDER / file_name),  # Absolute path: BASE_DIR/uploads/kyc/filename
+        str(ALT_UPLOAD_FOLDER / file_name),  # Docker path
+        str(CWD_UPLOAD_FOLDER / file_name),  # Current working directory path
+        f"uploads/kyc/{file_name}",  # Relative path
+        f"/app/uploads/kyc/{file_name}",  # Docker absolute path
+        file_name,  # Just the filename (if in current directory)
+    ]
+    
+    # Also check if file_path is stored in DB
+    for path in possible_paths:
+        if path and os.path.exists(path):
+            try:
+                with open(path, 'rb') as f:
+                    file_data = base64.b64encode(f.read()).decode('utf-8')
+                    print(f"✅ Loaded file: {file_name} from {path}, size: {len(file_data)} chars")
+                    return file_data
+            except Exception as e:
+                print(f"Error reading {path}: {str(e)}")
+                continue
+    
+    print(f"❌ File not found: {file_name}")
+    return None
+
+def create_upload_directory():
+    """Create upload directory if it doesn't exist"""
+    UPLOAD_FOLDER.mkdir(parents=True, exist_ok=True)
+
+
+# ============================================
+# CUSTOMER RESOURCES
+# ============================================
 
 class CustomerGetDocumentsResource(Resource):
     @auth_required
@@ -63,11 +107,10 @@ class CustomerUploadDocumentsResource(Resource):
         if current_customer.role != "customer":
             return {"error": "Unauthorized"}, 403
         
-        # Debug: Log all received files
-        print(f"Received files: {list(request.files.keys())}")
-        print(f"Form data: {request.form}")
+        # Create upload directory
+        create_upload_directory()
         
-        # Required files - MUST MATCH FRONTEND KEYS
+        # Required files
         required_files = ['front_image', 'back_image', 'salary_certificate', 'bank_statement']
         for file_key in required_files:
             if file_key not in request.files:
@@ -75,17 +118,10 @@ class CustomerUploadDocumentsResource(Resource):
             file = request.files[file_key]
             if file.filename == '':
                 return {"error": f"Empty file for: {file_key}"}, 400
-            print(f"File {file_key}: {file.filename}, size: {len(file.read()) if file else 0}")
-            file.seek(0)  # Reset file pointer after reading
         
-        # Create upload directory if not exists
-        if not os.path.exists(UPLOAD_FOLDER):
-            os.makedirs(UPLOAD_FOLDER)
-        
-        notes = request.form.get('notes', '')
         uploaded_documents = []
         
-        # Document configurations - KEYS MUST MATCH FRONTEND
+        # Document configurations
         doc_configs = {
             'front_image': {
                 'name': 'Ghana Card (Front)',
@@ -116,7 +152,7 @@ class CustomerUploadDocumentsResource(Resource):
             ext = file.filename.rsplit('.', 1)[1].lower()
             customer_id = current_customer.customer_id or f"C{current_customer.id:03d}"
             filename = f"{file_key}_{customer_id}_{uuid.uuid4().hex}_{datetime.now().strftime('%Y%m%d%H%M%S')}.{ext}"
-            filepath = os.path.join(UPLOAD_FOLDER, filename)
+            filepath = str(UPLOAD_FOLDER / filename)
             
             # Save file
             file.save(filepath)
@@ -175,13 +211,12 @@ class CustomerUploadOptionalDocumentResource(Resource):
         if not allowed_file(file.filename):
             return {"error": f"File type not allowed. Allowed: {', '.join(ALLOWED_EXTENSIONS)}"}, 400
         
-        if not os.path.exists(UPLOAD_FOLDER):
-            os.makedirs(UPLOAD_FOLDER)
+        create_upload_directory()
         
         ext = file.filename.rsplit('.', 1)[1].lower()
         customer_id = current_customer.customer_id or f"C{current_customer.id:03d}"
         filename = f"{document_type}_{customer_id}_{uuid.uuid4().hex}_{datetime.now().strftime('%Y%m%d%H%M%S')}.{ext}"
-        filepath = os.path.join(UPLOAD_FOLDER, filename)
+        filepath = str(UPLOAD_FOLDER / filename)
         file.save(filepath)
         
         document = Document(
@@ -245,10 +280,16 @@ class CustomerGetKYCStatusResource(Resource):
         if all_required_present and all(d.status == 'verified' for d in kyc_documents if d.document_type in required_types):
             status = 'verified'
         
+        # Calculate submitted_at
+        submitted_at = None
+        if kyc_documents:
+            earliest_date = min([d.created_at for d in kyc_documents if d.created_at], default=None)
+            submitted_at = earliest_date.isoformat() if earliest_date else None
+        
         return {
             "status": status,
             "level": current_customer.verification_level or 'basic',
-            "submitted_at": min([d.created_at for d in kyc_documents]).isoformat() if kyc_documents else None,
+            "submitted_at": submitted_at,
             "verified_at": current_customer.kyc_completed_on.isoformat() if current_customer.kyc_completed_on else None,
             "rejection_reason": rejection_reason
         }, 200
@@ -257,7 +298,6 @@ class CustomerGetKYCStatusResource(Resource):
 # ============================================
 # ADMIN KYC MANAGEMENT RESOURCES
 # ============================================
-# resources/customer_document.py
 
 class AdminGetPendingCustomerKYCResource(Resource):
     @auth_required
@@ -284,32 +324,8 @@ class AdminGetPendingCustomerKYCResource(Resource):
             if documents:
                 documents_data = []
                 for doc in documents:
-                    file_data = None
-                    
-                    # Try multiple possible paths
-                    possible_paths = [
-                        doc.file_path,  # Path stored in DB
-                        str(UPLOAD_FOLDER / doc.file_name),
-                        str(ALT_UPLOAD_FOLDER / doc.file_name),
-                        str(CWD_UPLOAD_FOLDER / doc.file_name),
-                        f"uploads/kyc/{doc.file_name}",
-                        f"/app/uploads/kyc/{doc.file_name}"
-                    ]
-                    
-                    print(f"Looking for file: {doc.file_name}")
-                    
-                    for path in possible_paths:
-                        if path and os.path.exists(path):
-                            try:
-                                with open(path, 'rb') as f:
-                                    file_data = base64.b64encode(f.read()).decode('utf-8')
-                                    print(f"✅ Loaded file: {doc.file_name} from {path}, size: {len(file_data)} chars")
-                                break  # Exit loop once file is found
-                            except Exception as e:
-                                print(f"Error reading {path}: {str(e)}")
-                    
-                    if not file_data:
-                        print(f"❌ File not found: {doc.file_name}")
+                    # Load file data using helper function
+                    file_data = find_file_and_load_base64(doc.file_name)
                     
                     documents_data.append({
                         "id": doc.id,
@@ -318,7 +334,7 @@ class AdminGetPendingCustomerKYCResource(Resource):
                         "document_type": doc.document_type,
                         "status": doc.status,
                         "uploaded_at": doc.created_at.isoformat() if doc.created_at else None,
-                        "file_data": file_data,  # This MUST have the base64 data
+                        "file_data": file_data,
                         "file_name": doc.file_name,
                         "file_size": doc.file_size,
                         "mime_type": doc.mime_type,
@@ -326,14 +342,20 @@ class AdminGetPendingCustomerKYCResource(Resource):
                         "verified_at": doc.verified_at.isoformat() if doc.verified_at else None
                     })
                 
+                # Calculate submitted_at
+                submitted_at = None
+                if documents:
+                    earliest_date = min([d.created_at for d in documents if d.created_at], default=None)
+                    submitted_at = earliest_date.isoformat() if earliest_date else None
+                
                 result.append({
                     "customer_id": customer.id,
-                    "customer_name": customer.full_name or customer.business_name,
-                    "phone": customer.phone,
-                    "email": customer.business_email or customer.email,
+                    "customer_name": customer.full_name or customer.business_name or f"Customer {customer.id}",
+                    "phone": customer.phone or 'N/A',
+                    "email": customer.business_email or customer.email or 'N/A',
                     "kyc_status": customer.kyc_status,
                     "verification_level": customer.verification_level or 'basic',
-                    "submitted_at": min([d.created_at for d in documents]).isoformat() if documents else None,
+                    "submitted_at": submitted_at,
                     "documents": documents_data
                 })
         
@@ -341,6 +363,8 @@ class AdminGetPendingCustomerKYCResource(Resource):
             "pending_verifications": result,
             "total": len(result)
         }, 200
+
+
 class AdminGetVerifiedCustomerKYCResource(Resource):
     @auth_required
     def get(self):
@@ -359,9 +383,9 @@ class AdminGetVerifiedCustomerKYCResource(Resource):
         for customer in verified_customers:
             result.append({
                 "customer_id": customer.id,
-                "customer_name": customer.full_name or customer.business_name,
-                "phone": customer.phone,
-                "email": customer.business_email or customer.email,
+                "customer_name": customer.full_name or customer.business_name or f"Customer {customer.id}",
+                "phone": customer.phone or 'N/A',
+                "email": customer.business_email or customer.email or 'N/A',
                 "kyc_status": customer.kyc_status,
                 "verified_at": customer.kyc_completed_on.isoformat() if customer.kyc_completed_on else None,
                 "verification_level": customer.verification_level
@@ -389,7 +413,6 @@ class AdminGetRejectedCustomerKYCResource(Resource):
         
         result = []
         for customer in rejected_customers:
-            # Get rejection reason from documents
             rejected_docs = Document.query.filter_by(
                 user_id=customer.id,
                 status='rejected'
@@ -397,9 +420,9 @@ class AdminGetRejectedCustomerKYCResource(Resource):
             
             result.append({
                 "customer_id": customer.id,
-                "customer_name": customer.full_name or customer.business_name,
-                "phone": customer.phone,
-                "email": customer.business_email or customer.email,
+                "customer_name": customer.full_name or customer.business_name or f"Customer {customer.id}",
+                "phone": customer.phone or 'N/A',
+                "email": customer.business_email or customer.email or 'N/A',
                 "kyc_status": customer.kyc_status,
                 "rejection_reason": rejected_docs.rejection_reason if rejected_docs else None,
                 "rejected_at": rejected_docs.verified_at.isoformat() if rejected_docs and rejected_docs.verified_at else None
@@ -409,6 +432,8 @@ class AdminGetRejectedCustomerKYCResource(Resource):
             "rejected_customers": result,
             "total": len(result)
         }, 200
+
+
 class AdminGetCustomerKYCDetailResource(Resource):
     @auth_required
     def get(self, customer_id):
@@ -428,24 +453,7 @@ class AdminGetCustomerKYCDetailResource(Resource):
         
         documents_data = []
         for doc in documents:
-            file_data = None
-            
-            # Try multiple possible paths
-            possible_paths = [
-                doc.file_path,
-                f"uploads/kyc/{doc.file_name}",
-                f"/app/uploads/kyc/{doc.file_name}",
-                os.path.join(os.getcwd(), 'uploads', 'kyc', doc.file_name)
-            ]
-            
-            for path in possible_paths:
-                if path and os.path.exists(path):
-                    try:
-                        with open(path, 'rb') as f:
-                            file_data = base64.b64encode(f.read()).decode('utf-8')
-                        break
-                    except Exception as e:
-                        print(f"Error reading file: {str(e)}")
+            file_data = find_file_and_load_base64(doc.file_name)
             
             documents_data.append({
                 "id": doc.id,
@@ -474,202 +482,6 @@ class AdminGetCustomerKYCDetailResource(Resource):
                 "kyc_completed_on": customer.kyc_completed_on.isoformat() if customer.kyc_completed_on else None
             },
             "documents": documents_data
-        }, 200
-class AdminRejectCustomerKYCResource(Resource):
-    @auth_required
-    def put(self, customer_id):
-        """Admin rejects a customer's KYC verification"""
-        current_admin = current_user()
-        
-        if current_admin.role != 'admin':
-            return {"error": "Unauthorized"}, 403
-        
-        data = request.get_json()
-        rejection_reason = data.get('rejection_reason', '')
-        
-        if not rejection_reason:
-            return {"error": "Rejection reason is required"}, 400
-        
-        customer = User.query.get(customer_id)
-        if not customer or customer.role != 'customer':
-            return {"error": "Customer not found"}, 404
-        
-        try:
-            # Update all documents to rejected
-            documents = Document.query.filter_by(user_id=customer.id).all()
-            for doc in documents:
-                doc.status = 'rejected'
-                doc.rejection_reason = rejection_reason
-                doc.verified_by = current_admin.id
-                doc.verified_at = datetime.now()
-            
-            # Update customer KYC status
-            customer.kyc_status = 'rejected'
-            
-            db.session.commit()
-            
-            return {
-                "message": "Customer KYC verification rejected",
-                "customer_id": customer.id,
-                "status": "rejected",
-                "rejection_reason": rejection_reason
-            }, 200
-            
-        except Exception as e:
-            db.session.rollback()
-            print(f"Error rejecting customer KYC: {str(e)}")
-            return {"error": f"Failed to reject KYC: {str(e)}"}, 500
-
-
-# Add these to your existing customer_document.py
-# resources/customer_document.py
-
-
-
-class AdminGetPendingCustomerKYCResource(Resource):
-    @auth_required
-    def get(self):
-        """Admin gets all pending customer KYC verification requests"""
-        current_admin = current_user()
-        
-        if current_admin.role != 'admin':
-            return {"error": "Unauthorized"}, 403
-        
-        # Get customers with pending KYC
-        pending_customers = User.query.filter(
-            User.role == 'customer',
-            User.kyc_status == 'pending'
-        ).all()
-        
-        result = []
-        for customer in pending_customers:
-            # Get all documents for this customer
-            documents = Document.query.filter_by(
-                user_id=customer.id
-            ).order_by(Document.created_at.desc()).all()
-            
-            if documents:
-                documents_data = []
-                for doc in documents:
-                    file_data = None
-                    # Check multiple possible file paths
-                    possible_paths = [
-                        doc.file_path,
-                        f"uploads/kyc/{doc.file_name}",
-                        f"/app/uploads/kyc/{doc.file_name}",
-                        os.path.join(os.getcwd(), 'uploads', 'kyc', doc.file_name)
-                    ]
-                    
-                    for path in possible_paths:
-                        if path and os.path.exists(path):
-                            try:
-                                with open(path, 'rb') as f:
-                                    file_data = base64.b64encode(f.read()).decode('utf-8')
-                                    print(f"✅ Loaded customer file: {doc.file_name}, size: {len(file_data)} chars")
-                                break
-                            except Exception as e:
-                                print(f"Error reading {path}: {str(e)}")
-                    
-                    if not file_data:
-                        print(f"❌ Customer file not found: {doc.file_name}")
-                    
-                    documents_data.append({
-                        "id": doc.id,
-                        "document_id": doc.document_id,
-                        "document_name": doc.document_name,
-                        "document_type": doc.document_type,
-                        "status": doc.status,
-                        "uploaded_at": doc.created_at.isoformat() if doc.created_at else None,
-                        "file_data": file_data,  # This MUST be included
-                        "file_name": doc.file_name,
-                        "file_size": doc.file_size,
-                        "mime_type": doc.mime_type,
-                        "rejection_reason": doc.rejection_reason,
-                        "verified_at": doc.verified_at.isoformat() if doc.verified_at else None
-                    })
-                
-                result.append({
-                    "customer_id": customer.id,
-                    "customer_name": customer.full_name or customer.business_name,
-                    "phone": customer.phone,
-                    "email": customer.business_email or customer.email,
-                    "kyc_status": customer.kyc_status,
-                    "verification_level": customer.verification_level or 'basic',
-                    "submitted_at": min([d.created_at for d in documents]).isoformat() if documents else None,
-                    "documents": documents_data
-                })
-        
-        return {
-            "pending_verifications": result,
-            "total": len(result)
-        }, 200
-    
-class AdminGetVerifiedCustomerKYCResource(Resource):
-    @auth_required
-    def get(self):
-        """Admin gets all verified customer KYC"""
-        current_admin = current_user()
-        
-        if current_admin.role != 'admin':
-            return {"error": "Unauthorized"}, 403
-        
-        verified_customers = User.query.filter(
-            User.role == 'customer',
-            User.kyc_status == 'verified'
-        ).all()
-        
-        result = []
-        for customer in verified_customers:
-            result.append({
-                "customer_id": customer.id,
-                "customer_name": customer.full_name or customer.business_name,
-                "phone": customer.phone,
-                "email": customer.business_email or customer.email,
-                "kyc_status": customer.kyc_status,
-                "verified_at": customer.kyc_completed_on.isoformat() if customer.kyc_completed_on else None,
-                "verification_level": customer.verification_level
-            })
-        
-        return {
-            "verified_customers": result,
-            "total": len(result)
-        }, 200
-
-
-class AdminGetRejectedCustomerKYCResource(Resource):
-    @auth_required
-    def get(self):
-        """Admin gets all rejected customer KYC"""
-        current_admin = current_user()
-        
-        if current_admin.role != 'admin':
-            return {"error": "Unauthorized"}, 403
-        
-        rejected_customers = User.query.filter(
-            User.role == 'customer',
-            User.kyc_status == 'rejected'
-        ).all()
-        
-        result = []
-        for customer in rejected_customers:
-            rejected_docs = Document.query.filter_by(
-                user_id=customer.id,
-                status='rejected'
-            ).first()
-            
-            result.append({
-                "customer_id": customer.id,
-                "customer_name": customer.full_name or customer.business_name,
-                "phone": customer.phone,
-                "email": customer.business_email or customer.email,
-                "kyc_status": customer.kyc_status,
-                "rejection_reason": rejected_docs.rejection_reason if rejected_docs else None,
-                "rejected_at": rejected_docs.verified_at.isoformat() if rejected_docs and rejected_docs.verified_at else None
-            })
-        
-        return {
-            "rejected_customers": result,
-            "total": len(result)
         }, 200
 
 
@@ -710,8 +522,6 @@ class AdminApproveCustomerKYCResource(Resource):
             db.session.rollback()
             print(f"Error approving customer KYC: {str(e)}")
             return {"error": f"Failed to approve KYC: {str(e)}"}, 500
-
-
 
 
 class AdminRejectCustomerKYCResource(Resource):
@@ -792,7 +602,8 @@ class AdminApproveCustomerDocumentResource(Resource):
             return {
                 "message": "Document approved successfully",
                 "document_id": document.document_id,
-                "status": "verified"
+                "status": "verified",
+                "all_verified": all_verified
             }, 200
             
         except Exception as e:
@@ -843,3 +654,68 @@ class AdminRejectCustomerDocumentResource(Resource):
             db.session.rollback()
             print(f"Error rejecting document: {str(e)}")
             return {"error": f"Failed to reject document: {str(e)}"}, 500
+
+
+# ============================================
+# DEBUG RESOURCE
+# ============================================
+
+class DebugFileLocationResource(Resource):
+    @auth_required
+    def get(self):
+        """Debug endpoint to check file locations"""
+        current_admin = current_user()
+        
+        if current_admin.role != 'admin':
+            return {"error": "Unauthorized"}, 403
+        
+        # Get all documents with pending status
+        pending_docs = Document.query.filter_by(status='pending').limit(10).all()
+        
+        debug_info = {
+            "base_dir": str(BASE_DIR),
+            "upload_folder": str(UPLOAD_FOLDER),
+            "upload_folder_exists": UPLOAD_FOLDER.exists(),
+            "alt_upload_folder": str(ALT_UPLOAD_FOLDER),
+            "alt_upload_folder_exists": ALT_UPLOAD_FOLDER.exists(),
+            "cwd": str(Path.cwd()),
+            "pending_documents_count": len(pending_docs),
+            "documents": []
+        }
+        
+        for doc in pending_docs:
+            file_info = {
+                "id": doc.id,
+                "file_name": doc.file_name,
+                "file_path_db": doc.file_path,
+                "exists_in_db_path": os.path.exists(doc.file_path) if doc.file_path else False,
+                "checks": []
+            }
+            
+            # Check multiple locations
+            locations_to_check = [
+                str(UPLOAD_FOLDER / doc.file_name),
+                str(ALT_UPLOAD_FOLDER / doc.file_name),
+                str(CWD_UPLOAD_FOLDER / doc.file_name),
+                f"uploads/kyc/{doc.file_name}",
+                doc.file_name,
+            ]
+            
+            for loc in locations_to_check:
+                exists = os.path.exists(loc)
+                file_info["checks"].append({
+                    "path": loc,
+                    "exists": exists
+                })
+                if exists:
+                    file_info["found_at"] = loc
+                    try:
+                        with open(loc, 'rb') as f:
+                            size = len(f.read())
+                        file_info["file_size_bytes"] = size
+                    except:
+                        pass
+            
+            debug_info["documents"].append(file_info)
+        
+        return debug_info, 200
