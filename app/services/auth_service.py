@@ -100,7 +100,7 @@ class ForgotPasswordResource(Resource):
     def post(self):
         """Request password reset - sends OTP to user's email"""
         data = request.get_json()
-        email = data.get('email')
+        email = request.json["email"]
         
         if not email:
             return {"error": "Email address is required"}, 400
@@ -254,7 +254,7 @@ class VerifyResetOTPResource(Resource):
         db.session.commit()
         
         return {
-            "message": "OTP verified successfully",
+            "message": "OTP  is sverified successfully",
             "reset_token": reset_token
         }, 200
 
