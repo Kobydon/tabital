@@ -14,7 +14,7 @@ from typing import List, Optional
 CENT = Decimal("0.01")
 
 RULES = {
-    "version": "2026-09-26.3",
+    "version": "2026-09-26.4",
     # Eligibility (hard declines)
     "min_age": 18,
     "min_monthly_salary": 2000,          # GHS, §2
@@ -35,11 +35,13 @@ RULES = {
     "high_tier_if_late_payments_at_least": 2,
     # Dynamic limit (D9, founder 2026-09-26): each plan completed with no late payment adds
     # 0.1 x salary (capped at +0.5); each instalment paid late takes 0.5 x salary off.
-    # The multiplier never goes below min_multiplier.
+    # The multiplier never goes below min_multiplier, so eligible high-tier customers can
+    # still buy on 50% down (founder option B, 2026-09-26). A payment currently overdue
+    # still freezes new credit regardless.
     "growth_per_clean_plan": "0.1",
     "growth_cap": "0.5",
     "reduction_per_late_payment": "0.5",
-    "min_multiplier": "0",
+    "min_multiplier": "0.25",
     # Extended 6/12-month plans unlock after this many consecutive on-time purchases (D7).
     # They stay off until their terms are set (D12); this only reports eligibility.
     "extended_plan_min_consecutive_clean_plans": 3,

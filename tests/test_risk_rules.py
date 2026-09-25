@@ -106,9 +106,19 @@ def test_each_late_payment_takes_half_a_salary_off_the_limit():
     assert any("reduced by 0.5" in r for r in d.reasons)
 
 
-def test_limit_never_goes_below_zero():
-    d = assess(good(late_payments_total=5))         # high tier 0.5 - 2.5 -> floored at 0
-    assert d.eligible and d.limit_multiplier == D("0") and d.credit_limit == D("0.00")
+def test_high_tier_keeps_a_minimum_limit_of_a_quarter_salary():
+    """Founder option B: late payments can't push the limit below 0.25 x salary."""
+    d = assess(good(late_payments_total=2))         # high tier 0.5 - 1.0 -> floored at 0.25
+    assert d.eligible and d.tier == "high"
+    assert d.limit_multiplier == D("0.25") and d.credit_limit == D("1250.00")
+    assert d.available_limit == D("1250.00")
+    assert d.pay_in_4_dp_rate == D("0.50")
+    assert assess(good(late_payments_total=6)).credit_limit == D("1250.00")
+
+
+def test_overdue_still_freezes_the_minimum_limit():
+    d = assess(good(late_payments_total=2, currently_overdue=True, max_days_past_due=3))
+    assert d.credit_limit == D("1250.00") and d.available_limit == D("0.00")
 
 
 def test_extended_plan_eligibility_after_three_clean_plans():
