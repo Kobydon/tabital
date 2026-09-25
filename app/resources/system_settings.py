@@ -11,9 +11,9 @@ class SystemSettingsResource(Resource):
     def get(self):
         """Get all system settings"""
         current_admin = current_user()
-        
-        # if current_admin.role != 'admin':
-        #     return {"error": "Unauthorized"}, 403
+
+        if current_admin.role != 'admin':
+            return {"error": "Unauthorized"}, 403
         
         settings = SystemSetting.query.all()
         
@@ -111,180 +111,47 @@ class InstallmentCalculatorResource(Resource):
     def post(self):
         """Calculate installment plan"""
 
-        current_user_obj = current_user()
+        from ..services import plan_engine
 
         data = request.get_json() or {}
 
-        product_price = float(data.get('product_price', 0))
-        quantity = int(data.get('quantity', 1))
-        number_of_installments = int(data.get('number_of_installments', 1))
+        try:
+            product_price = plan_engine.money(data.get('product_price', 0))
+            quantity = int(data.get('quantity', 1))
+            number_of_installments = int(data.get('number_of_installments', 1))
+            plan = plan_engine.quote(product_price, quantity, number_of_installments, SystemSetting.get_value)
+        except (plan_engine.PlanError, ArithmeticError, TypeError, ValueError) as e:
+            return {"error": str(e) or "Invalid plan request"}, 400
 
-        if product_price <= 0:
-            return {"error": "Valid product price is required"}, 400
+        f = float
+        late_fee_percentage = f(SystemSetting.get_value("late_fee_percentage", 10))
 
-        # Product total
-        total_price = product_price * quantity
-
-        # System settings
-        merchant_fee_percentage = float(
-            SystemSetting.get_value("merchant_fee_percentage", 10)
-        )
-
-        late_fee_percentage = float(
-            SystemSetting.get_value("late_fee_percentage", 10)
-        )
-
-        service_fee = float(
-            SystemSetting.get_value("service_fee", 0)
-        )
-
-        delivery_fee = 50.0
-
-        # ==========================================
-        # DOWN PAYMENT RULES
-        # ==========================================
-
-        if number_of_installments == 1:
-            down_payment_percentage = 100
-
-        elif number_of_installments in [2, 3]:
-            down_payment_percentage = 50
-
-        elif number_of_installments == 4:
-            down_payment_percentage = 40
-
-        else:
-            return {
-                "error": "Only 1, 2, 3 and 4 installment plans are supported"
-            }, 400
-
-        # ==========================================
-        # CALCULATIONS
-        # ==========================================
-
-        product_down_payment = (
-            total_price * down_payment_percentage / 100
-        )
-
-        due_now_amount = (
-            product_down_payment + delivery_fee
-        )
-
-        remaining_balance = (
-            total_price - product_down_payment
-        )
-
-        remaining_installments = max(
-            number_of_installments - 1,
-            0
-        )
-
-        installment_amount = (
-            remaining_balance / remaining_installments
-            if remaining_installments > 0
-            else 0
-        )
-
-        merchant_fee_amount = (
-            total_price * merchant_fee_percentage / 100
-        )
-
-        merchant_payout = (
-            total_price - merchant_fee_amount
-        )
-
-        total_payable = (
-            total_price + delivery_fee + service_fee
-        )
-
-        # ==========================================
-        # PAYMENT SCHEDULE
-        # ==========================================
-
-        payment_schedule = []
-
-        current_date = datetime.now()
-
-        # First payment
-        payment_schedule.append({
-            "installment_number": 1,
-            "amount": round(due_now_amount, 2),
-            "due_date": current_date.strftime("%Y-%m-%d"),
-            "status": "due_now",
-            "description": f"{down_payment_percentage}% Down Payment + Delivery Fee"
-        })
-
-        # Remaining payments
-        for i in range(1, remaining_installments + 1):
-
-            due_date = current_date + timedelta(days=(30 * i))
-
-            if number_of_installments == 2:
-                description = "Final Payment (Remaining 50%)"
-
-            elif number_of_installments == 3:
-                description = f"Payment {i + 1} of 3 (25%)"
-
-            elif number_of_installments == 4:
-                description = f"Payment {i + 1} of 4 (20%)"
-
-            else:
-                description = f"Installment {i + 1}"
-
-            payment_schedule.append({
-                "installment_number": i + 1,
-                "amount": round(installment_amount, 2),
-                "due_date": due_date.strftime("%Y-%m-%d"),
-                "status": "pending",
-                "description": description
-            })
-
+        # This is a quote only. /customer/purchase recalculates from the stored product price.
         return {
-            "product_price": round(total_price, 2),
-
+            "product_price": f(plan["price"]),
             "down_payment": {
-                "percentage": down_payment_percentage,
-                "amount": round(due_now_amount, 2)
+                "percentage": f(plan["down_payment_rate"] * 100),
+                "amount": f(plan["down_payment"])
             },
-
-            "remaining_balance": round(
-                remaining_balance,
-                2
-            ),
-
+            "due_now": f(plan["due_now"]),
+            "remaining_balance": f(plan["financed_balance"]),
             "installment_details": {
-                "total_installments": number_of_installments,
-                "remaining_installments": remaining_installments,
-                "installment_amount": round(
-                    installment_amount,
-                    2
-                )
+                "total_installments": plan["n_payments"],
+                "remaining_installments": plan["deferred_payments"],
+                "installment_amount": f(plan["installment_amount"])
             },
-
             "fees": {
-                "service_fee": service_fee,
-                "delivery_fee": delivery_fee,
-                "merchant_fee_percentage": merchant_fee_percentage,
-                "merchant_fee_amount": round(
-                    merchant_fee_amount,
-                    2
-                ),
+                "service_fee": f(plan["service_fee"]),
+                "delivery_fee": f(plan["delivery_fee"]),
+                "merchant_fee_percentage": f(plan["merchant_fee_rate"] * 100),
+                "merchant_fee_amount": f(plan["merchant_fee"]),
                 "late_fee_percentage": late_fee_percentage
             },
-
             "totals": {
-                "total_payable": round(
-                    total_payable,
-                    2
-                ),
-                "merchant_payout": round(
-                    merchant_payout,
-                    2
-                )
+                "total_payable": f(plan["total_payable"]),
+                "merchant_payout": f(plan["merchant_settlement"])
             },
-
-            "payment_schedule": payment_schedule
-
+            "payment_schedule": plan_engine.schedule_to_json(plan["schedule"])
         }, 200
 
 class LateFeeCalculatorResource(Resource):

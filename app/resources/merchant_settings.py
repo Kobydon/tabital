@@ -97,28 +97,10 @@ class MerchantUpdatePasswordResource(Resource):
         if current_merchant.role != "merchant":
             return {"error": "Unauthorized"}, 403
         
-        data = request.get_json()
-        current_password = data.get('current_password')
-        new_password = data.get('new_password')
-        
-        if not current_password or not new_password:
-            return {"error": "Current password and new password are required"}, 400
-        
-        # Verify current password
-        from flask_praetorian import Praetorian
-        guard = Praetorian()
-        
-        if not guard.authenticate(current_merchant.phone, current_password):
-            return {"error": "Current password is incorrect"}, 401
-        
-        if len(new_password) < 6:
-            return {"error": "New password must be at least 6 characters"}, 400
-        
-        # Update password
-        current_merchant.password = guard.encrypt_password(new_password)
-        db.session.commit()
-        
-        return {"message": "Password updated successfully"}, 200
+        from ..services.auth_service import change_password
+
+        data = request.get_json() or {}
+        return change_password(current_merchant, data.get('current_password'), data.get('new_password'))
 
 
 class MerchantUpdatePaymentSettingsResource(Resource):
@@ -244,20 +226,8 @@ class MerchantUpdateKYCResource(Resource):
         if current_merchant.role != "merchant":
             return {"error": "Unauthorized"}, 403
         
-        data = request.get_json()
-        
-        # Update KYC fields
-        if 'kyc_status' in data:
-            current_merchant.kyc_status = data['kyc_status']
-        if 'verification_level' in data:
-            current_merchant.verification_level = data['verification_level']
-        
-        if data.get('kyc_status') == 'verified' and not current_merchant.kyc_completed_on:
-            current_merchant.kyc_completed_on = datetime.utcnow()
-        
-        db.session.commit()
-        
-        return {"message": "KYC information updated successfully"}, 200
+        # KYC status and verification level are set by Tabital after review, never by the merchant
+        return {"error": "KYC status is set by Tabital after document review"}, 403
 
 
 class MerchantUploadDocumentResource(Resource):

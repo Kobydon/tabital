@@ -548,57 +548,49 @@ class AdminApproveOrderResource(Resource):
         if order.status != 'pending':
             return {"error": f"Order already {order.status}"}, 400
         
-        data = request.get_json()
-        
-        # Update order status
+        data = request.get_json() or {}
+
+        # Order status is committed together with the plan, payments and transaction below
         order.status = 'approved'
         order.approved_at = datetime.now()
         order.admin_notes = data.get('admin_notes', '')
-        db.session.commit()
-        
-        print(f"Order {order.order_id} approved")
-        
+
+        from ..services import plan_engine
+        from ..models.system_settings import SystemSetting
+
         # Calculate dates
         start_date = datetime.now()
         end_date = start_date
         if order.number_of_installments > 1:
-            end_date = start_date + timedelta(days=30 * (order.number_of_installments - 1))
+            end_date = plan_engine.add_months(start_date, order.number_of_installments - 1)
+
+        # Balance still owed after Payment 1 (down payment + delivery fee) = financed balance FB
+        stored_schedule = json.loads(order.payment_schedule) if order.payment_schedule else []
+        if stored_schedule:
+            remaining_balance = float(sum(plan_engine.money(p['amount']) for p in stored_schedule[1:]))
+        else:
+            remaining_balance = order.total_payable - order.down_payment_amount
+
+        # MDR is charged on the product value P, not on delivery fee (§5.2: MS = P x (1 - MDR))
+        product_value = plan_engine.money(order.product_price) * (order.quantity or 1)
+        mdr = plan_engine.rate(SystemSetting.get_value("merchant_fee_percentage", 10)) / 100
+        commission_amount = (product_value * mdr).quantize(plan_engine.CENT)
+        payout_amount = float(product_value - commission_amount)
         
-        # Calculate remaining balance
-        remaining_balance = order.total_payable - order.down_payment_amount
-        
-        # ============================================
-        # CALCULATE PAYOUT AMOUNT (10% commission deducted)
-        # ============================================
-        commission_rate = 10  # 10% commission
-        payout_amount = float(order.total_payable) * (1 - (commission_rate / 100))
-        commission_amount = float(order.total_payable) * (commission_rate / 100)
-        
-        print(f"Order Total: GHS {order.total_payable}")
-        print(f"Commission ({commission_rate}%): GHS {commission_amount}")
-        print(f"Merchant Payout: GHS {payout_amount}")
-        
-        print(f"Creating instalment plan for customer {order.customer_id}, product {order.product_name}")
-        print(f"Total: {order.total_payable}, Down: {order.down_payment_amount}, Remaining: {remaining_balance}")
-        print(f"Installments: {order.number_of_installments}, Amount per installment: {order.installment_amount}")
-        
-        # Generate plan ID
-        plan_id = None
-        try:
-            plan_id = InstalmentPlan.generate_plan_id(InstalmentPlan)
-            print(f"Generated plan_id: {plan_id}")
-        except Exception as e:
-            print(f"Error generating plan_id: {e}")
-            # Fallback: create a simple plan_id
-            from sqlalchemy import func
-            result = db.session.query(func.max(InstalmentPlan.id)).scalar()
-            plan_id = f"IP{(result + 1) if result else 1:04d}"
-            print(f"Fallback plan_id: {plan_id}")
-        
-        # Create instalment plan
+        # Payment 1 (down payment + delivery fee) is only marked paid when the admin
+        # records the reference for money actually received. Otherwise it waits for verification.
+        down_payment_reference = (data.get('down_payment_reference') or '').strip()
+        down_payment_method = (data.get('down_payment_method') or 'mobile_money').strip()
+        down_payment_received = bool(down_payment_reference)
+
+        # Orders placed before server-side pricing carry a browser-built schedule
+        # (no 'type' field). Those amounts can't be trusted, so they must be re-placed.
+        if not stored_schedule or any('type' not in item for item in stored_schedule):
+            db.session.rollback()
+            return {"error": "This order was priced by the old checkout. Reject it and ask the customer to place it again."}, 409
         try:
             instalment_plan = InstalmentPlan(
-                plan_id=plan_id,
+                plan_id=InstalmentPlan.generate_plan_id(InstalmentPlan),
                 merchant_id=order.merchant_id,
                 customer_id=order.customer_id,
                 transaction_id=None,
@@ -613,125 +605,50 @@ class AdminApproveOrderResource(Resource):
                 start_date=start_date,
                 end_date=end_date,
                 status='active',
-                payment_status='partial',
-                paid_installments=1,
+                payment_status='partial' if down_payment_received else 'pending',
+                paid_installments=1 if down_payment_received else 0,
                 customer_name=order.customer.full_name or order.customer.business_name or "Customer",
                 customer_phone=order.customer.phone or "",
-                customer_email=order.customer.email or ""
-                # Store payout information
-               
-                # payout_amount=payout_amount
+                customer_email=order.customer.business_email or order.customer.email or ""
             )
             db.session.add(instalment_plan)
             db.session.flush()
-            print(f"Instalment plan created with ID: {instalment_plan.id}, Plan ID: {instalment_plan.plan_id}")
-        except Exception as e:
-            print(f"Error creating instalment plan: {e}")
-            db.session.rollback()
-            return {"error": f"Failed to create instalment plan: {str(e)}"}, 500
-        
-        # Parse payment schedule from order
-        payment_schedule = []
-        if order.payment_schedule:
-            try:
-                if isinstance(order.payment_schedule, str):
-                    payment_schedule = json.loads(order.payment_schedule)
+
+
+            for item in stored_schedule:
+                number = int(item['installment_number'])
+                amount = float(plan_engine.money(item['amount']))
+                due_date = datetime.strptime(item['due_date'][:10], '%Y-%m-%d')
+                is_down_payment = number == 1
+
+                if is_down_payment and down_payment_received:
+                    status, paid_date, paid_amount = 'paid', start_date, amount
+                elif is_down_payment:
+                    status, paid_date, paid_amount = 'pending_verification', None, 0
                 else:
-                    payment_schedule = order.payment_schedule
-                print(f"Payment schedule loaded: {len(payment_schedule)} payments")
-            except Exception as e:
-                print(f"Error parsing payment schedule: {e}")
-                payment_schedule = []
-        
-        if not payment_schedule:
-            # Create default payment schedule
-            print("Creating default payment schedule")
-            payment_schedule = []
-            # Down payment
-            payment_schedule.append({
-                "installment_number": 1,
-                "amount": order.down_payment_amount,
-                "due_date": start_date.strftime('%Y-%m-%d'),
-                "status": "due_now",
-                "description": "Down Payment (40% upfront)"
-            })
-            # Remaining installments
-            for i in range(2, order.number_of_installments + 1):
-                due_date = start_date + timedelta(days=30 * (i - 1))
-                payment_schedule.append({
-                    "installment_number": i,
-                    "amount": order.installment_amount,
-                    "due_date": due_date.strftime('%Y-%m-%d'),
-                    "status": "pending",
-                    "description": f"Installment {i} of {order.number_of_installments}"
-                })
-        
-        # Create payment schedule entries
-        payments_created = 0
-        for i, payment in enumerate(payment_schedule):
-            try:
-                installment_number = payment.get('installment_number', i + 1)
-                amount = payment.get('amount', 0)
-                due_date_str = payment.get('due_date')
-                
-                # Parse due date
-                if due_date_str and due_date_str != 'Now':
-                    try:
-                        due_date = datetime.strptime(due_date_str, '%Y-%m-%d')
-                    except:
-                        due_date = start_date + timedelta(days=30 * (installment_number - 1))
-                else:
-                    due_date = start_date if installment_number == 1 else start_date + timedelta(days=30 * (installment_number - 1))
-                
-                # First installment (down payment) is paid, others are pending
-                status = 'paid' if installment_number == 1 else 'pending'
-                paid_date = start_date if installment_number == 1 else None
-                
-                # Generate payment ID
-                payment_id = None
-                try:
-                    payment_id = InstalmentPayment.generate_payment_id(InstalmentPayment)
-                except:
-                    from sqlalchemy import func
-                    result = db.session.query(func.max(InstalmentPayment.id)).scalar()
-                    payment_id = f"PAY{(result + 1) if result else 1:04d}"
-                
-                instalment_payment = InstalmentPayment(
-                    payment_id=payment_id,
+                    status, paid_date, paid_amount = 'pending', None, 0
+
+                db.session.add(InstalmentPayment(
+                    payment_id=InstalmentPayment.generate_payment_id(InstalmentPayment),
                     plan_id=instalment_plan.id,
-                    installment_number=int(installment_number),
+                    installment_number=number,
                     due_date=due_date,
                     paid_date=paid_date,
-                    amount=float(amount),
-                    paid_amount=float(amount) if status == 'paid' else 0,
+                    amount=amount,
+                    paid_amount=paid_amount,
                     status=status,
+                    payment_method=down_payment_method if is_down_payment and down_payment_received else None,
+                    payment_reference=down_payment_reference if is_down_payment and down_payment_received else None,
                     late_fee=0,
                     late_fee_paid=False
-                )
-                db.session.add(instalment_payment)
-                payments_created += 1
-                print(f"Created payment {installment_number}: amount {amount}, status {status}")
-            except Exception as e:
-                print(f"Error creating payment {i}: {e}")
-        
-        print(f"Created {payments_created} payment schedule entries")
-        
-        # Create transaction record
-        try:
-            # Generate transaction ID
-            transaction_id = None
-            try:
-                transaction_id = Transaction.generate_transaction_id(Transaction)
-            except:
-                from sqlalchemy import func
-                result = db.session.query(func.max(Transaction.id)).scalar()
-                transaction_id = f"TRX{(result + 1) if result else 1:04d}"
-            
+                ))
+                db.session.flush()
+
             transaction = Transaction(
-                transaction_id=transaction_id,
+                transaction_id=Transaction.generate_transaction_id(Transaction),
                 customer_id=order.customer_id,
                 merchant_id=order.merchant_id,
-                amount=float(order.total_payable),
+                amount=float(product_value),
                 product_name=order.product_name,
                 product_description=order.product_description or "",
                 quantity=order.quantity or 1,
@@ -740,32 +657,29 @@ class AdminApproveOrderResource(Resource):
                 payment_status='processing',
                 delivery_address=order.delivery_address or "",
                 transaction_date=datetime.now(),
-              
                 payout_amount=payout_amount
             )
             db.session.add(transaction)
-            print(f"Transaction created with ID: {transaction.transaction_id}")
-            print(f"  - Total: GHS {order.total_payable}")
-            print(f"  - Commission ({commission_rate}%): GHS {commission_amount}")
-            print(f"  - Merchant Payout: GHS {payout_amount}")
-        except Exception as e:
-            print(f"Error creating transaction: {e}")
-        
-        # Commit all changes
-        try:
+            db.session.flush()
+            instalment_plan.transaction_id = transaction.id
+
             db.session.commit()
-            print("All changes committed successfully")
         except Exception as e:
-            print(f"Error committing changes: {e}")
-            db.session.rollback()
-            return {"error": f"Failed to commit: {str(e)}"}, 500
-        
+            return self._fail(f"Failed to approve order: {e}")
+
         return {
             "message": "Order approved and instalment plan created",
             "transaction_id": transaction.transaction_id,
             "plan_id": instalment_plan.plan_id,
-            "payments_created": payments_created,
+            "payments_created": len(stored_schedule),
+            "down_payment_status": "paid" if down_payment_received else "pending_verification",
             "order_total": float(order.total_payable),
+            "merchant_fee": float(commission_amount),
             "payout_amount": payout_amount,
             "currency": "GHS"
         }, 200
+
+    @staticmethod
+    def _fail(message):
+        db.session.rollback()
+        return {"error": message}, 500

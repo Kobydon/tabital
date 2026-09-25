@@ -31,7 +31,7 @@ class User(db.Model):
     payment_plan = db.Column(db.String(50))
     payment_frequency = db.Column(db.String(50))
     ref_name = db.Column(db.String(100))
-    ref_phone = db.Column(db.String(100),unique=True)
+    ref_phone = db.Column(db.String(100))  # not unique: two customers may share a referee
     ref_relationship = db.Column(db.String(100))
     shop_url = db.Column(db.String(200))
     
@@ -79,6 +79,7 @@ class User(db.Model):
     updated_at = db.Column(db.DateTime, onupdate=db.func.now())
     reset_otp = db.Column(db.String(10))
     reset_otp_expiry = db.Column(db.DateTime)
+    reset_otp_attempts = db.Column(db.Integer, default=0)
     reset_token = db.Column(db.String(100))
     reset_token_expiry = db.Column(db.DateTime)
 

@@ -362,34 +362,30 @@ class AdminMarkPaymentReceivedResource(Resource):
         if current_admin.role != 'admin':
             return {"error": "Unauthorized"}, 403
         
-        data = request.get_json()
-        amount_received = data.get('amount_received', 0)
-        payment_method = data.get('payment_method', 'manual')
-        payment_reference = data.get('payment_reference', '')
-        
+        from app.resources.admin_instalments import mark_instalment_paid
+
+        data = request.get_json() or {}
+        amount_received = float(data.get('amount_received') or 0)
+        payment_method = data.get('payment_method') or 'manual'
+        payment_reference = (data.get('payment_reference') or '').strip()
+
         payment = InstalmentPayment.query.get(payment_id)
         if not payment:
             return {"error": "Payment not found"}, 404
-        
+
         if payment.status == 'paid':
             return {"error": "Payment already marked as paid"}, 400
-        
-        payment.status = 'paid'
-        payment.paid_date = datetime.now()
-        payment.paid_amount = amount_received if amount_received > 0 else payment.amount
-        payment.payment_method = payment_method
-        payment.payment_reference = payment_reference
-        
-        # Update the instalment plan
-        plan = InstalmentPlan.query.get(payment.plan_id)
-        if plan:
-            plan.paid_installments += 1
-            plan.remaining_amount -= payment.amount
-            
-            if plan.paid_installments >= plan.number_of_installments:
-                plan.status = 'completed'
-                plan.completed_at = datetime.now()
-        
+
+        payment_reference = payment_reference or payment.payment_reference
+        if not payment_reference:
+            return {"error": "Enter the MoMo/bank reference of the money received"}, 400
+
+        total_due = payment.get_total_due()
+        if amount_received and amount_received + 0.005 < total_due:
+            # Partial payments need the ledger (Phase 1); don't mark a short payment as paid
+            return {"error": f"Amount received is less than the {total_due:.2f} due"}, 400
+
+        mark_instalment_paid(payment, payment_method, payment_reference, amount_received or None)
         db.session.commit()
         
         return {

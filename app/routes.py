@@ -190,7 +190,6 @@ from .resources.customer_dashboard import (
     CustomerRecentTransactionsResource,
     CustomerInstalmentsResource,
     CustomerPlanDetailsResource,
-    CustomerMakePaymentResource
 )
 
 from .resources.customer_profile import (

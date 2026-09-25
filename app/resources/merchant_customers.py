@@ -212,21 +212,9 @@ class MerchantUpdateCustomerResource(Resource):
         if not transaction_exists:
             return {"error": "Customer not found"}, 404
         
-        data = request.get_json()
-        
-        allowed_fields = ['full_name', 'business_name', 'phone', 'email', 'city', 
-                         'address', 'gps', 'designation', 'company', 'income_range']
-        
-        for field in allowed_fields:
-            if field in data:
-                setattr(customer, field, data[field])
-        
-        if 'status' in data and data['status'] in ['active', 'inactive']:
-            customer.status = data['status']
-        
-        db.session.commit()
-        
-        return {"message": "Customer information updated successfully"}, 200
+        # A customer's identity, contact, income and account status belong to the customer
+        # and Tabital. Merchants can view them but not change them.
+        return {"error": "Customer details can only be changed by the customer or Tabital support"}, 403
 
 
 class MerchantGetCustomerStatsResource(Resource):

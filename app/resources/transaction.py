@@ -101,64 +101,13 @@ class GetTransactionsResource(Resource):
 class CreateTransactionResource(Resource):
     @auth_required
     def post(self):
-        """Create a new transaction"""
-        current_user_obj = current_user()
-        
-        if current_user_obj.role != "customer":
-            return {"error": "Only customers can create transactions"}, 403
-        
-        data = request.get_json()
-        
-        # Validate required fields
-        required_fields = ['merchant_id', 'amount', 'product_name']
-        for field in required_fields:
-            if field not in data:
-                return {"error": f"{field} is required"}, 400
-        
-        # Check if merchant exists
-        merchant = User.query.get(data['merchant_id'])
-        if not merchant or merchant.role != 'merchant':
-            return {"error": "Merchant not found"}, 404
-        
-        # Calculate payout amounts (10% commission)
-        commission_rate = 10
-        commission_amount = data['amount'] * (commission_rate / 100)
-        payout_amount = data['amount'] - commission_amount
-        
-        # Create transaction
-        transaction = Transaction(
-            customer_id=current_user_obj.id,
-            merchant_id=data['merchant_id'],
-            amount=data['amount'],
-            product_name=data['product_name'],
-            product_description=data.get('product_description', ''),
-            quantity=data.get('quantity', 1),
-            payment_method=data.get('payment_method', ''),
-            payment_reference=data.get('payment_reference', ''),
-            delivery_address=data.get('delivery_address', ''),
-            notes=data.get('notes', ''),
-            status='pending',
-            payment_status='pending',
-            delivery_status='pending',
-            commission_rate=commission_rate,
-            commission_amount=commission_amount,
-            payout_amount=payout_amount
-        )
-        
-        transaction.transaction_id = transaction.generate_transaction_id()
-        
-        db.session.add(transaction)
-        db.session.commit()
-        
-        return {
-            "message": "Transaction created successfully",
-            "transaction_id": transaction.transaction_id,
-            "id": transaction.id,
-            "amount": transaction.amount,
-            "commission_rate": commission_rate,
-            "commission_amount": commission_amount,
-            "payout_amount": payout_amount
-        }, 201
+        """Disabled: transactions are only created when an admin approves a purchase order.
+
+        This endpoint let a customer create a transaction for any merchant and amount,
+        and it crashed on unknown columns anyway. Purchases go through /customer/purchase.
+        """
+        return {"error": "Transactions are created from approved purchase orders. Use /customer/purchase."}, 410
+
 
 
 class UpdateTransactionStatusResource(Resource):
@@ -171,18 +120,16 @@ class UpdateTransactionStatusResource(Resource):
         if not transaction:
             return {"error": "Transaction not found"}, 404
         
-        # Check permissions
+        # Money states (status, payment_status) are admin-only. Merchants may update
+        # fulfilment details on their own transactions. Customers can't edit transactions.
         if current_user_obj.role == 'admin':
-            pass
-        elif current_user_obj.role == 'merchant' and transaction.merchant_id != current_user_obj.id:
+            allowed_fields = ['status', 'payment_status', 'delivery_status', 'tracking_number', 'payment_reference', 'notes']
+        elif current_user_obj.role == 'merchant' and transaction.merchant_id == current_user_obj.id:
+            allowed_fields = ['delivery_status', 'tracking_number', 'notes']
+        else:
             return {"error": "Unauthorized"}, 403
-        elif current_user_obj.role == 'customer' and transaction.customer_id != current_user_obj.id:
-            return {"error": "Unauthorized"}, 403
-        
-        data = request.get_json()
-        
-        # Allowed fields to update
-        allowed_fields = ['status', 'payment_status', 'delivery_status', 'tracking_number', 'payment_reference', 'notes']
+
+        data = request.get_json() or {}
         
         for field in allowed_fields:
             if field in data:
@@ -441,17 +388,16 @@ class MerchantUpdateTransactionStatusResource(Resource):
         if not transaction or transaction.merchant_id != current_merchant.id:
             return {"error": "Transaction not found"}, 404
         
-        data = request.get_json()
-        
-        allowed_fields = ['status', 'payment_status', 'delivery_status', 'tracking_number', 'notes']
-        
+        data = request.get_json() or {}
+
+        # Merchants can't set status/payment_status: those drive settlements.
+        # Delivery is confirmed through /merchant/orders/<id>/delivery.
+        allowed_fields = ['delivery_status', 'tracking_number', 'notes']
+
         for field in allowed_fields:
             if field in data:
                 setattr(transaction, field, data[field])
-        
-        if data.get('status') == 'completed' and not transaction.completion_date:
-            transaction.completion_date = datetime.utcnow()
-        
+
         db.session.commit()
         
         return {

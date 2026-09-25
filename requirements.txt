@@ -14,3 +14,5 @@ flask_restful
 gunicorn
 requests
 openpyxl
+reportlab
+pytest

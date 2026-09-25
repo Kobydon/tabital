@@ -42,30 +42,32 @@ class InstalmentPayment(db.Model):
     
     def apply_late_fee(self):
         """
-        Apply 10% late fee if payment is overdue by at least one day.
-        Late fee is 10% of the original payment amount.
+        Apply the late fee the day after the due date (no grace period, CLAUDE.md §13.1 D5).
+        The fee is late_fee_percentage (default 10%) of the instalment amount (§6.2).
         """
-        if self.status == 'paid':
+        from decimal import Decimal, ROUND_HALF_UP
+        from .system_settings import SystemSetting
+
+        if self.status in ('paid', 'pending_verification'):
             return False
-        
+
         if not self.due_date:
             return False
-        
+
         today = datetime.utcnow()
-        
-        # Check if payment is overdue by at least one day
-        if today > self.due_date:
-            days_overdue = (today - self.due_date).days
-            
+
+        # Overdue from the calendar day after the due date
+        if today.date() > self.due_date.date():
             # Apply late fee only if not already applied
-            if self.late_fee == 0 and self.late_fee_paid == False:
-                # Calculate 10% late fee
-                self.late_fee = self.amount * 0.10
+            if not self.late_fee and not self.late_fee_paid:
+                pct = Decimal(str(SystemSetting.get_value("late_fee_percentage", 10)))
+                fee = (Decimal(str(self.amount)) * pct / 100).quantize(Decimal("0.01"), ROUND_HALF_UP)
+                self.late_fee = float(fee)
                 self.late_fee_applied_date = today
                 self.status = 'overdue'
                 db.session.commit()
                 return True
-        
+
         return False
     
     def get_total_due(self):
@@ -75,9 +77,10 @@ class InstalmentPayment(db.Model):
     @staticmethod
     def apply_late_fees_for_all_overdue_payments():
         """Static method to apply late fees to all overdue payments (for cron jobs)"""
+        start_of_today = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
         overdue_payments = InstalmentPayment.query.filter(
             InstalmentPayment.status.in_(['pending', 'overdue']),
-            InstalmentPayment.due_date < datetime.utcnow(),
+            InstalmentPayment.due_date < start_of_today,
             InstalmentPayment.late_fee == 0,
             InstalmentPayment.late_fee_paid == False
         ).all()

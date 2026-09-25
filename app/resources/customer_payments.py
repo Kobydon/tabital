@@ -263,86 +263,53 @@ class CustomerPaymentReminderResource(Resource):
 class CustomerMakePaymentResource(Resource):
     @auth_required
     def post(self):
-        """Make a payment for an installment with late fee handling"""
+        """Customer submits a payment for the next instalment.
+
+        Until Paystack is integrated (Phase 2), a customer submission never marks an
+        instalment paid. It records the method and reference and sets the instalment to
+        'pending_verification'. An admin confirms it with
+        /admin/instalments/payments/<id>/mark-paid after checking the money arrived.
+        """
         current_customer = current_user()
-        
+
         if current_customer.role != "customer":
             return {"error": "Unauthorized"}, 403
-        
-        data = request.get_json()
+
+        data = request.get_json() or {}
         plan_id = data.get('plan_id')
-        amount = data.get('amount')
-        payment_method = data.get('payment_method')
-        payment_reference = data.get('payment_reference', '')
-        notes = data.get('notes', '')
-        
-        if not plan_id or not amount:
-            return {"error": "Plan ID and amount are required"}, 400
-        
-        # Get the instalment plan
+        payment_method = (data.get('payment_method') or '').strip()
+        payment_reference = (data.get('payment_reference') or '').strip()
+
+        if not plan_id:
+            return {"error": "Plan ID is required"}, 400
+        if payment_method not in ('mobile_money', 'bank_transfer', 'card'):
+            return {"error": "Choose Mobile Money, bank transfer or card"}, 400
+        if not payment_reference:
+            return {"error": "Enter the transaction reference from your MoMo or bank receipt"}, 400
+
         plan = InstalmentPlan.query.filter_by(id=plan_id, customer_id=current_customer.id).first()
         if not plan:
             return {"error": "Instalment plan not found"}, 404
-        
-        # Find the next pending payment
-        next_payment = InstalmentPayment.query.filter_by(
-            plan_id=plan.id,
-            status='pending'
+
+        next_payment = InstalmentPayment.query.filter(
+            InstalmentPayment.plan_id == plan.id,
+            InstalmentPayment.status.in_(['pending', 'overdue'])
         ).order_by(InstalmentPayment.installment_number).first()
-        
+
         if not next_payment:
-            # Also check for overdue payments
-            next_payment = InstalmentPayment.query.filter_by(
-                plan_id=plan.id,
-                status='overdue'
-            ).order_by(InstalmentPayment.installment_number).first()
-            
-            if not next_payment:
-                return {"error": "No pending payments found for this plan"}, 400
-        
-        # Apply late fee if payment is overdue
-        next_payment.apply_late_fee()
-        
-        # Calculate total due (amount + late fee)
-        total_due = next_payment.get_total_due()
-        
-        # Verify payment amount
-        if amount < total_due:
-            return {
-                "error": f"Insufficient payment amount. Total due is {total_due:.2f} (includes {next_payment.late_fee:.2f} late fee)"
-            }, 400
-        
-        # Process payment
-        next_payment.status = 'paid'
-        next_payment.paid_date = datetime.now()
+            return {"error": "No payments due on this plan"}, 400
+
+        next_payment.status = 'pending_verification'
         next_payment.payment_method = payment_method
         next_payment.payment_reference = payment_reference
-        next_payment.paid_amount = amount
-        
-        # If late fee was applied and paid
-        if next_payment.late_fee > 0 and not next_payment.late_fee_paid:
-            next_payment.late_fee_paid = True
-        
-        # Update plan
-        plan.paid_installments += 1
-        plan.remaining_amount -= next_payment.amount
-        
-        if plan.paid_installments == plan.number_of_installments:
-            plan.status = 'completed'
-            plan.payment_status = 'completed'
-            plan.completed_at = datetime.now()
-        
         db.session.commit()
-        
+
         return {
-            "message": "Payment successful",
-            "payment_reference": next_payment.payment_id,
-            "amount_paid": amount,
-            "late_fee_paid": next_payment.late_fee if next_payment.late_fee_paid else 0,
-            "remaining_balance": plan.remaining_amount,
-            "paid_installments": plan.paid_installments,
-            "total_installments": plan.number_of_installments
-        }, 200
+            "message": "Payment submitted. We'll confirm it once the money is received.",
+            "payment_id": next_payment.payment_id,
+            "status": next_payment.status,
+            "amount_due": next_payment.get_total_due()
+        }, 202
 
 # resources/customer_paid_payments.py
 from flask_restful import Resource, request

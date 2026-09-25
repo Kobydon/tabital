@@ -7,6 +7,33 @@ from app.extensions import db
 from datetime import datetime, timedelta
 from sqlalchemy import func, or_
 
+
+def mark_instalment_paid(payment, payment_method, payment_reference, amount_received=None):
+    """Record a confirmed payment and update the plan.
+
+    remaining_amount tracks the financed balance, which excludes Payment 1
+    (down payment + delivery fee), so only instalments 2..N reduce it.
+    """
+    payment.status = 'paid'
+    payment.paid_date = datetime.now()
+    payment.paid_amount = amount_received if amount_received else payment.get_total_due()
+    payment.payment_method = payment_method
+    payment.payment_reference = payment_reference
+    if payment.late_fee:
+        payment.late_fee_paid = True
+
+    plan = InstalmentPlan.query.get(payment.plan_id)
+    if plan:
+        plan.paid_installments = (plan.paid_installments or 0) + 1
+        if payment.installment_number > 1:
+            plan.remaining_amount = round((plan.remaining_amount or 0) - payment.amount, 2)
+        plan.payment_status = 'partial'
+        if plan.paid_installments >= plan.number_of_installments:
+            plan.status = 'completed'
+            plan.payment_status = 'completed'
+            plan.completed_at = datetime.now()
+
+
 class AdminInstalmentStatsResource(Resource):
     @auth_required
     def get(self):
@@ -329,33 +356,23 @@ class AdminMarkPaymentAsPaidResource(Resource):
         if current_admin.role != 'admin':
             return {"error": "Unauthorized"}, 403
         
-        data = request.get_json()
-        payment_method = data.get('payment_method', 'manual')
-        payment_reference = data.get('payment_reference', '')
-        
+        data = request.get_json() or {}
+        payment_method = data.get('payment_method') or 'manual'
+        # Keep the customer's submitted reference unless the admin supplies the confirmed one
+        payment_reference = (data.get('payment_reference') or '').strip()
+
         payment = InstalmentPayment.query.get(payment_id)
         if not payment:
             return {"error": "Payment not found"}, 404
-        
+
         if payment.status == 'paid':
             return {"error": "Payment already paid"}, 400
-        
-        payment.status = 'paid'
-        payment.paid_date = datetime.now()
-        payment.paid_amount = payment.amount
-        payment.payment_method = payment_method
-        payment.payment_reference = payment_reference
-        
-        # Update the instalment plan
-        plan = InstalmentPlan.query.get(payment.plan_id)
-        if plan:
-            plan.paid_installments += 1
-            plan.remaining_amount -= payment.amount
-            
-            if plan.paid_installments >= plan.number_of_installments:
-                plan.status = 'completed'
-                plan.completed_at = datetime.now()
-        
+
+        payment_reference = payment_reference or payment.payment_reference
+        if not payment_reference:
+            return {"error": "Enter the MoMo/bank reference of the money received"}, 400
+
+        mark_instalment_paid(payment, payment_method, payment_reference)
         db.session.commit()
         
         return {
