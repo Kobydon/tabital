@@ -527,10 +527,6 @@ from ..models.instalment_payment import InstalmentPayment
 from ..extensions import db
 from datetime import datetime, timedelta
 import json
-import logging
-
-# Set up logging
-logging.basicConfig(level=logging.DEBUG)
 
 class AdminApproveOrderResource(Resource):
     @auth_required
