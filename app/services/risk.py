@@ -14,7 +14,7 @@ from typing import List, Optional
 CENT = Decimal("0.01")
 
 RULES = {
-    "version": "2026-09-26.4",
+    "version": "2026-09-26.5",
     # Eligibility (hard declines)
     "min_age": 18,
     "min_monthly_salary": 2000,          # GHS, §2
@@ -42,6 +42,10 @@ RULES = {
     "growth_cap": "0.5",
     "reduction_per_late_payment": "0.5",
     "min_multiplier": "0.25",
+    # A late instalment paid within this many days of its due date, together with its late
+    # fee, is "cured": it stays in the history but doesn't count against tier or limit
+    # (founder, 2026-09-26). Late payments otherwise count for the whole history.
+    "late_payment_cure_days": 7,
     # Extended 6/12-month plans unlock after this many consecutive on-time purchases (D7).
     # They stay off until their terms are set (D12); this only reports eligibility.
     "extended_plan_min_consecutive_clean_plans": 3,
@@ -80,8 +84,9 @@ class Facts:
     outstanding_balance: Decimal = Decimal("0.00")
     max_days_past_due: int = 0           # worst currently unpaid instalment
     currently_overdue: bool = False
-    late_payments_total: int = 0         # instalments ever charged a late fee
-    completed_clean_plans: int = 0       # completed with no late payment
+    late_payments_total: int = 0         # late instalments that count (not cured), whole history
+    late_payments_cured: int = 0         # late but paid within the cure window with the fee (no penalty)
+    completed_clean_plans: int = 0       # completed with no late payment that counts
     consecutive_clean_plans: int = 0     # most recent completed plans in a row with no late payment
     defaulted_plans: int = 0
 
@@ -153,7 +158,9 @@ def assess(f: Facts, r=None) -> Decision:
             or f.currently_overdue):
         tier = "high"
         reasons.append("High tier: short employment, late payment history or a payment currently overdue")
-    elif f.completed_clean_plans >= r["low_tier_min_clean_plans"] and f.late_payments_total == 0:
+    elif (f.completed_clean_plans >= r["low_tier_min_clean_plans"]
+          and f.late_payments_total == 0 and f.late_payments_cured == 0):
+        # Low tier requires no late payments ever, cured ones included (founder, 2026-09-26)
         tier = "low"
         reasons.append("Low tier: plans completed on time")
     else:
@@ -178,6 +185,9 @@ def assess(f: Facts, r=None) -> Decision:
             reasons.append(f"Limit reduced by {multiplier - new_multiplier} x salary for "
                            f"{f.late_payments_total} late payment(s)")
         multiplier = new_multiplier
+
+    if f.late_payments_cured:
+        reasons.append(f"{f.late_payments_cured} late payment(s) paid within the cure window: no effect on limit")
 
     credit_limit = (f.monthly_salary * multiplier).quantize(CENT, ROUND_HALF_UP)
     available = max(credit_limit - f.outstanding_balance, Decimal("0.00")).quantize(CENT)
@@ -229,14 +239,27 @@ def facts_for(user, today=None) -> Facts:
     from . import ledger
 
     today = today or datetime.utcnow().date()
+    cure_days = int(current_rules().get("late_payment_cure_days", 7))
     plans = InstalmentPlan.query.filter_by(customer_id=user.id).all()
     plan_ids = [p.id for p in plans]
     payments = InstalmentPayment.query.filter(InstalmentPayment.plan_id.in_(plan_ids)).all() if plan_ids else []
 
+    # Late instalments that count against the customer, per plan. A late instalment is
+    # cured (doesn't count) if paid within `cure_days` of its due date with its late fee.
+    # An unpaid one only counts once it's past the cure window.
     late_by_plan = {}
+    cured = 0
     for p in payments:
-        if p.late_fee_applied_date is not None:
-            late_by_plan[p.plan_id] = late_by_plan.get(p.plan_id, 0) + 1
+        if p.late_fee_applied_date is None or not p.due_date:
+            continue
+        due = p.due_date.date()
+        if p.status == 'paid' and p.paid_date:
+            if (p.paid_date.date() - due).days <= cure_days and p.late_fee_paid and p.late_fee:
+                cured += 1
+                continue
+        elif (today - due).days <= cure_days:
+            continue          # still inside the cure window
+        late_by_plan[p.plan_id] = late_by_plan.get(p.plan_id, 0) + 1
 
     # Unpaid instalments past their due date (awaiting-verification ones get the benefit of the doubt)
     max_dpd = 0
@@ -271,6 +294,7 @@ def facts_for(user, today=None) -> Facts:
         max_days_past_due=max_dpd,
         currently_overdue=max_dpd > 0,
         late_payments_total=sum(late_by_plan.values()),
+        late_payments_cured=cured,
         completed_clean_plans=len(clean),
         consecutive_clean_plans=consecutive,
         defaulted_plans=len([p for p in plans if p.status == 'defaulted']),
