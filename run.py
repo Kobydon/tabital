@@ -68,14 +68,16 @@ def init_system_settings():
             "type": "number",
             "description": "Delivery fee, paid with the down payment and never financed"
         },
-        # Phase 1 plans only, all 0% interest (CLAUDE.md §4). The 6-month plan unlocks later (13.1 D7).
+        # Phase 1 plans only, all 0% interest (CLAUDE.md §4). Extended 6- and 12-month plans
+        # are for eligible customers and stay inactive until their rules are set (13.1 D7, D12).
         "installment_options": {
             "value": [
                 {"months": 1, "label": "Full Payment", "interest_rate": 0, "is_active": True},
                 {"months": 2, "label": "Pay in 2", "interest_rate": 0, "is_active": True},
                 {"months": 3, "label": "Pay in 3", "interest_rate": 0, "is_active": True},
                 {"months": 4, "label": "Pay in 4", "interest_rate": 0, "is_active": True},
-                {"months": 6, "label": "6 Months", "interest_rate": 10, "is_active": False}
+                {"months": 6, "label": "6 Months", "interest_rate": 10, "is_active": False},
+                {"months": 12, "label": "12 Months", "interest_rate": 0, "is_active": False}
             ],
             "type": "json",
             "description": "Available installment plan options"
