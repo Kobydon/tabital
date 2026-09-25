@@ -8,6 +8,8 @@ from .models.user import User
 from .models import ledger as _ledger_model  # noqa: F401  (registers the ledger table)
 from .models import payment_intent as _payment_intent_model  # noqa: F401
 from .models import risk_assessment as _risk_assessment_model  # noqa: F401
+from .models import message_outbox as _message_outbox_model  # noqa: F401
+from .models import payment_method as _payment_method_model  # noqa: F401
 from .routes import register_routes
 
 
@@ -58,6 +60,22 @@ def register_commands(app):
         db.session.add(admin)
         db.session.commit()
         click.echo(f"Admin {phone} created")
+
+    @app.cli.command("run-daily")
+    @click.option("--date", "run_date", default=None, help="Service as of this date (YYYY-MM-DD); default today")
+    @click.option("--no-reminders", is_flag=True)
+    @click.option("--no-autopay", is_flag=True)
+    def run_daily_command(run_date, no_reminders, no_autopay):
+        """Daily servicing: late fees, DPD buckets, collections stages, reminders, autopay.
+
+        Schedule once a day, e.g. a Render cron job at 06:00 Africa/Accra (06:00 UTC).
+        """
+        from datetime import datetime as _dt
+        from .services import servicing
+        day = _dt.strptime(run_date, "%Y-%m-%d").date() if run_date else None
+        summary = servicing.run_daily(day, send_reminders=not no_reminders, run_autopay=not no_autopay)
+        for key, value in summary.to_dict().items():
+            click.echo(f"{key}: {value}")
 
     @app.cli.command("ledger-backfill")
     @click.option("--dry-run", is_flag=True, help="Report what would be written without saving")

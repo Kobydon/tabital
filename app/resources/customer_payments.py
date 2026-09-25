@@ -20,9 +20,8 @@ class CustomerGetPaymentsResource(Resource):
         if current_customer.role != "customer":
             return {"error": "Unauthorized"}, 403
         
-        # Apply late fees to all overdue payments before displaying
-        InstalmentPayment.apply_late_fees_for_all_overdue_payments()
-        
+        # Late fees are applied by the daily servicing job (flask run-daily), not on page views
+
         # Get query parameters
         page = request.args.get('page', 1, type=int)
         limit = request.args.get('limit', 20, type=int)
@@ -112,9 +111,6 @@ class CustomerGetPaymentStatsResource(Resource):
         
         if current_customer.role != "customer":
             return {"error": "Unauthorized"}, 403
-        
-        # Apply late fees before calculating stats
-        InstalmentPayment.apply_late_fees_for_all_overdue_payments()
         
         # Get all instalment payments for customer
         payments = InstalmentPayment.query.join(

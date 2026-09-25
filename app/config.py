@@ -39,6 +39,10 @@ class Config:
     # Where Paystack sends the customer after paying (a frontend page)
     PAYSTACK_CALLBACK_URL = os.getenv("PAYSTACK_CALLBACK_URL", "http://localhost:4200/customer/payment-callback")
 
+    # SMS/WhatsApp provider for reminders: 'log' (default, writes to the log only) until a
+    # Ghana provider is chosen (§13.1 D11)
+    SMS_PROVIDER = os.getenv("SMS_PROVIDER", "log")
+
     # Mail settings for password reset
     MAIL_SERVER = os.getenv("MAIL_SERVER", "smtp.gmail.com")
     MAIL_PORT = int(os.getenv("MAIL_PORT", 587))

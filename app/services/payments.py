@@ -81,6 +81,12 @@ def apply_verified_transaction(intent, data):
 
     intent.paid_at = datetime.utcnow()
 
+    # Keep a reusable card for autopay (off until the customer switches it on)
+    from . import autopay
+    email = ((data.get('customer') or {}).get('email')) or None
+    if email:
+        autopay.save_authorization(intent.customer_id, email, data)
+
     if intent.purpose == PaymentIntent.DOWN_PAYMENT:
         return _apply_down_payment(intent)
 

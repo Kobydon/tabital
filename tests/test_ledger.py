@@ -12,7 +12,7 @@ from app.models.ledger import LedgerEntry
 from app.models.product import Product
 from app.models.user import User
 from tests.helpers import eligible_customer
-from app.services import ledger
+from app.services import ledger, servicing
 
 D = Decimal
 
@@ -88,7 +88,7 @@ def test_payments_and_late_fees_move_the_balance(app_ctx):
     # Instalment 3 is overdue: the late fee is charged the day after its due date (D5)
     p3.due_date = datetime.utcnow() - timedelta(days=2)
     db.session.commit()
-    assert InstalmentPayment.apply_late_fees_for_all_overdue_payments() == 1
+    assert servicing.run_daily(send_reminders=False, run_autopay=False).first_fees == 1
     assert ledger.customer_balance(plan) == D("1680.00")          # + 10% of 800
 
     res = client.post(f"/admin/instalments/payments/{p3.id}/waive-late-fee", headers=admin_headers,
@@ -97,7 +97,7 @@ def test_payments_and_late_fees_move_the_balance(app_ctx):
     assert ledger.customer_balance(plan) == D("1600.00")
 
     # A waived fee is never charged again
-    assert InstalmentPayment.apply_late_fees_for_all_overdue_payments() == 0
+    assert servicing.run_daily(send_reminders=False, run_autopay=False).first_fees == 0
     assert ledger.customer_balance(plan) == D("1600.00")
 
 
@@ -106,7 +106,7 @@ def test_late_fee_not_charged_on_due_date(app_ctx):
     p2 = InstalmentPayment.query.filter_by(plan_id=plan.id, installment_number=2).one()
     p2.due_date = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
     db.session.commit()
-    assert InstalmentPayment.apply_late_fees_for_all_overdue_payments() == 0
+    assert servicing.run_daily(send_reminders=False, run_autopay=False).first_fees == 0
 
 
 def test_waive_requires_reason(app_ctx):
@@ -114,7 +114,7 @@ def test_waive_requires_reason(app_ctx):
     p2 = InstalmentPayment.query.filter_by(plan_id=plan.id, installment_number=2).one()
     p2.due_date = datetime.utcnow() - timedelta(days=3)
     db.session.commit()
-    InstalmentPayment.apply_late_fees_for_all_overdue_payments()
+    servicing.run_daily(send_reminders=False, run_autopay=False).first_fees
     res = client.post(f"/admin/instalments/payments/{p2.id}/waive-late-fee",
                       headers=admin_headers, json={})
     assert res.status_code == 400

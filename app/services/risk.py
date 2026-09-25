@@ -282,9 +282,13 @@ def facts_for(user, today=None) -> Facts:
         else:
             counting += 1
 
-    # Unpaid instalments past their due date (awaiting-verification ones get the benefit of the doubt)
+    # Unpaid instalments past their due date (awaiting-verification ones get the benefit of the
+    # doubt, and plans paused by an open dispute don't count as overdue)
+    paused_plan_ids = {p.id for p in plans if p.paused_at is not None}
     max_dpd = 0
     for p in payments:
+        if p.plan_id in paused_plan_ids:
+            continue
         if p.status in ('pending', 'overdue') and p.due_date and p.due_date.date() < today:
             max_dpd = max(max_dpd, (today - p.due_date.date()).days)
 

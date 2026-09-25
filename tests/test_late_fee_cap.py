@@ -9,7 +9,7 @@ from app.extensions import db, guard
 from app.models.instalment import InstalmentPlan
 from app.models.instalment_payment import InstalmentPayment
 from app.models.user import User
-from app.services import ledger
+from app.services import ledger, servicing
 
 D = Decimal
 
@@ -44,7 +44,7 @@ def plan():
 
 
 def test_fees_stop_at_the_cap(plan):
-    assert InstalmentPayment.apply_late_fees_for_all_overdue_payments() == 5
+    assert servicing.run_daily(send_reminders=False, run_autopay=False).first_fees == 5
     fees = sorted(float(p.late_fee) for p in InstalmentPayment.query.filter_by(plan_id=plan.id))
     # 60 + 60 + 60 + 60 = 240, then only 10 left under the 250 cap, then nothing
     assert sum(fees) == 250.0
@@ -55,7 +55,7 @@ def test_fees_stop_at_the_cap(plan):
 
 
 def test_waived_fees_free_up_the_cap(plan):
-    InstalmentPayment.apply_late_fees_for_all_overdue_payments()
+    servicing.run_daily(send_reminders=False, run_autopay=False).first_fees
     p = InstalmentPayment.query.filter(InstalmentPayment.plan_id == plan.id, InstalmentPayment.late_fee > 0).first()
     ledger.late_fee_waived(plan, p, p.late_fee, reason="Goodwill")
     p.late_fee = 0

@@ -443,8 +443,30 @@ from .resources.underwriting import (
 )
 
 
+from .resources.servicing import (
+    CustomerPaymentMethodsResource,
+    CustomerPaymentMethodResource,
+    CustomerDisputesResource,
+    AdminDisputesResource,
+    AdminResolveDisputeResource,
+    AdminRunServicingResource,
+    AdminMessagesResource
+)
+
+
 def register_routes(app):
     api = Api(app)
+
+    # ============================================
+    # SERVICING: autopay cards, disputes, daily job (Phase 4)
+    # ============================================
+    api.add_resource(CustomerPaymentMethodsResource, "/customer/payment-methods")
+    api.add_resource(CustomerPaymentMethodResource, "/customer/payment-methods/<int:method_id>")
+    api.add_resource(CustomerDisputesResource, "/customer/disputes")
+    api.add_resource(AdminDisputesResource, "/admin/disputes")
+    api.add_resource(AdminResolveDisputeResource, "/admin/disputes/<int:dispute_id>/resolve")
+    api.add_resource(AdminRunServicingResource, "/admin/servicing/run")
+    api.add_resource(AdminMessagesResource, "/admin/messages")
 
     # ============================================
     # UNDERWRITING (Phase 3)

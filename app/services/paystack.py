@@ -72,6 +72,42 @@ def verify_transaction(reference):
     return payload["data"]
 
 
+def charge_authorization(*, email, amount_pesewas, authorization_code, reference, metadata=None):
+    """Charge a saved reusable authorization (autopay). Returns Paystack's transaction `data`.
+
+    data.status is 'success' when charged immediately; other statuses mean Paystack will
+    finish later and notify us by webhook.
+    """
+    body = {
+        "email": email,
+        "amount": int(amount_pesewas),
+        "currency": "GHS",
+        "authorization_code": authorization_code,
+        "reference": reference,
+        "metadata": metadata or {},
+    }
+    try:
+        res = requests.post(f"{_base()}/transaction/charge_authorization", json=body, headers=_headers(),
+                            timeout=TIMEOUT_SECONDS)
+        payload = res.json()
+    except (requests.RequestException, ValueError) as e:
+        raise PaystackError(f"Could not reach Paystack: {e}")
+    if res.status_code >= 400 or not payload.get("status"):
+        raise PaystackError(payload.get("message") or f"Paystack error {res.status_code}")
+    return payload["data"]
+
+
+def deactivate_authorization(authorization_code):
+    """Tell Paystack a saved card should no longer be chargeable (best effort)."""
+    try:
+        res = requests.post(f"{_base()}/customer/deactivate_authorization",
+                            json={"authorization_code": authorization_code}, headers=_headers(),
+                            timeout=TIMEOUT_SECONDS)
+        return res.status_code < 400
+    except requests.RequestException:
+        return False
+
+
 def refund_transaction(reference, amount_pesewas=None, reason=None):
     """Refund a successful transaction (all of it unless amount_pesewas is given).
 
