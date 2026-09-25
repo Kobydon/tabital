@@ -7,34 +7,7 @@ from app.extensions import db
 from datetime import datetime, timedelta
 from sqlalchemy import func, or_
 
-
-def mark_instalment_paid(payment, payment_method, payment_reference, amount_received=None, user=None):
-    """Record a confirmed payment, write it to the ledger, and update the plan.
-
-    remaining_amount tracks the financed balance, which excludes Payment 1
-    (down payment + delivery fee), so only instalments 2..N reduce it.
-    """
-    from app.services import ledger
-
-    payment.status = 'paid'
-    payment.paid_date = datetime.now()
-    payment.paid_amount = amount_received if amount_received else payment.get_total_due()
-    payment.payment_method = payment_method
-    payment.payment_reference = payment_reference
-    if payment.late_fee:
-        payment.late_fee_paid = True
-
-    plan = InstalmentPlan.query.get(payment.plan_id)
-    if plan:
-        ledger.payment_received(plan, payment, payment.paid_amount, payment_reference, user=user)
-        plan.paid_installments = (plan.paid_installments or 0) + 1
-        if payment.installment_number > 1:
-            plan.remaining_amount = round((plan.remaining_amount or 0) - payment.amount, 2)
-        plan.payment_status = 'partial'
-        if plan.paid_installments >= plan.number_of_installments:
-            plan.status = 'completed'
-            plan.payment_status = 'completed'
-            plan.completed_at = datetime.now()
+from app.services.payments import mark_instalment_paid
 
 
 class AdminInstalmentStatsResource(Resource):

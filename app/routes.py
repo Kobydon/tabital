@@ -426,8 +426,24 @@ from app.resources.admin_collection import (
 # ============================================
 
 
+from .resources.paystack_payments import (
+    CustomerPaymentConfigResource,
+    CustomerPaystackInitializeResource,
+    CustomerPaystackVerifyResource,
+    PaystackWebhookResource
+)
+
+
 def register_routes(app):
     api = Api(app)
+
+    # ============================================
+    # PAYSTACK (Phase 2)
+    # ============================================
+    api.add_resource(CustomerPaymentConfigResource, "/customer/payments/config")
+    api.add_resource(CustomerPaystackInitializeResource, "/customer/payments/paystack/initialize")
+    api.add_resource(CustomerPaystackVerifyResource, "/customer/payments/paystack/verify/<string:reference>")
+    api.add_resource(PaystackWebhookResource, "/webhooks/paystack")
 
     # ============================================
     # AUTHENTICATION ROUTES

@@ -362,7 +362,7 @@ class AdminMarkPaymentReceivedResource(Resource):
         if current_admin.role != 'admin':
             return {"error": "Unauthorized"}, 403
         
-        from app.resources.admin_instalments import mark_instalment_paid
+        from app.services.payments import mark_instalment_paid
 
         data = request.get_json() or {}
         amount_received = float(data.get('amount_received') or 0)
