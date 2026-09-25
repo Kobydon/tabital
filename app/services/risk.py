@@ -14,7 +14,7 @@ from typing import List, Optional
 CENT = Decimal("0.01")
 
 RULES = {
-    "version": "2026-09-26.2",
+    "version": "2026-09-26.3",
     # Eligibility (hard declines)
     "min_age": 18,
     "min_monthly_salary": 2000,          # GHS, §2
@@ -28,8 +28,10 @@ RULES = {
     },
     # Promotion to low: at least this many plans completed with no late payment
     "low_tier_min_clean_plans": 1,
-    # Demotion to high (founder, 2026-09-26: under 16 months employed, or 2+ late payments)
-    "high_tier_if_employment_months_below": 16,
+    # Demotion to high (founder, 2026-09-26: under 6 months employed, or 2+ late payments).
+    # Note: 6 months is also min_employment_months, so the employment trigger only matters
+    # if the eligibility minimum is ever lowered.
+    "high_tier_if_employment_months_below": 6,
     "high_tier_if_late_payments_at_least": 2,
     # Dynamic limit (D9, founder 2026-09-26): each plan completed with no late payment adds
     # 0.1 x salary (capped at +0.5); each instalment paid late takes 0.5 x salary off.

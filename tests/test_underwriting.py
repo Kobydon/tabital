@@ -62,7 +62,15 @@ def test_ineligible_purchase_is_declined_with_reasons_and_recorded(env):
     assert PurchaseOrder.query.count() == 0
 
 
+def high_tier_below_12_months():
+    """Raise the employment trigger through the risk_rules setting (tests the override path too)."""
+    import json
+    from app.models.system_settings import SystemSetting
+    SystemSetting.set_value("risk_rules", json.dumps({"high_tier_if_employment_months_below": 12}), "json")
+
+
 def test_high_tier_pays_50_percent_down_on_pay_in_4(env):
+    high_tier_below_12_months()
     c = make_user("customer", "0200000411", kyc_status="verified",
                   employment_start_date=date.today() - timedelta(days=240))   # ~8 months
     res = buy(env, c)
@@ -153,6 +161,7 @@ def test_admin_underwriting_view_shows_history(env):
 
 
 def test_quote_and_dashboard_show_customer_terms(env):
+    high_tier_below_12_months()
     c = make_user("customer", "0200000419", kyc_status="verified",
                   employment_start_date=date.today() - timedelta(days=240))
     headers = token(env["client"], c.phone)

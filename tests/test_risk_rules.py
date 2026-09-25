@@ -47,11 +47,13 @@ def test_unverified_salary_blocks_credit():
     assert not d.eligible and "not been verified" in " ".join(d.reasons)
 
 
-def test_short_employment_is_high_tier_with_50_percent_down():
-    d = assess(good(employment_start=date(2026, 1, 1)))   # 8 months
+def test_high_tier_gets_50_percent_down_and_half_salary_limit():
+    # High tier via the employment rule, with the threshold raised for this test
+    r = rules({"high_tier_if_employment_months_below": 12})
+    d = assess(good(employment_start=date(2026, 1, 1)), r)   # 8 months
     assert d.eligible and d.tier == "high"
     assert d.pay_in_4_dp_rate == D("0.50")
-    assert d.credit_limit == D("2500.00")                  # 0.5 x salary
+    assert d.credit_limit == D("2500.00")                     # 0.5 x salary
 
 
 def test_clean_history_promotes_to_low_and_grows_limit():
@@ -86,10 +88,11 @@ def test_late_payment_history_demotes_to_high():
     assert d.tier == "high"
 
 
-def test_employment_under_16_months_is_high_tier():
-    """Founder decision 2026-09-26: the high tier applies below 16 months employed."""
-    assert assess(good(employment_start=date(2025, 7, 1))).tier == "high"     # ~14 months
-    assert assess(good(employment_start=date(2025, 5, 1))).tier == "medium"   # 16 months
+def test_employment_threshold_is_6_months():
+    """Founder decision 2026-09-26: 6 months (not 16). Under 6 is declined; 6+ is medium."""
+    assert not assess(good(employment_start=date(2026, 4, 1))).eligible        # ~5 months
+    assert assess(good(employment_start=date(2026, 3, 1))).tier == "medium"    # ~7 months
+    assert assess(good(employment_start=date(2025, 7, 1))).tier == "medium"    # ~14 months
 
 
 def test_each_late_payment_takes_half_a_salary_off_the_limit():
