@@ -29,7 +29,7 @@ class CustomerDashboardStatsResource(Resource):
         ).all()
         
         # Calculate total outstanding
-        total_outstanding = sum(p.remaining_amount for p in active_plans)
+        total_outstanding = sum(p.outstanding_balance for p in active_plans)
         total_outstanding_plans_count = len(active_plans)
         
         # Get next payment
@@ -196,8 +196,8 @@ class CustomerUpcomingPaymentsResource(Resource):
                 "merchant_name": safe_str(plan.merchant.business_name or plan.merchant.full_name),
                 "merchant_phone": safe_str(plan.merchant.phone),
                 "total_amount": safe_float(plan.total_amount),
-                "amount_paid": safe_float(plan.total_amount - plan.remaining_amount),
-                "amount_outstanding": safe_float(plan.remaining_amount),
+                "amount_paid": safe_float(plan.paid_to_date),
+                "amount_outstanding": safe_float(plan.outstanding_balance),
                 "instalment_term": safe_int(plan.number_of_installments),
                 "instalment_frequency": safe_str(plan.frequency),
                 "instalment_amount": safe_float(plan.installment_amount),
@@ -290,8 +290,8 @@ class CustomerInstalmentsResource(Resource):
                 "merchant_name": safe_str(plan.merchant.business_name or plan.merchant.full_name),
                 "merchant_phone": safe_str(plan.merchant.phone),
                 "total_amount": safe_float(plan.total_amount),
-                "amount_paid": safe_float(plan.total_amount - plan.remaining_amount),
-                "amount_outstanding": safe_float(plan.remaining_amount),
+                "amount_paid": safe_float(plan.paid_to_date),
+                "amount_outstanding": safe_float(plan.outstanding_balance),
                 "instalment_term": safe_int(plan.number_of_installments),
                 "instalment_frequency": safe_str(plan.frequency),
                 "instalment_amount": safe_float(plan.installment_amount),
@@ -354,8 +354,8 @@ class CustomerPlanDetailsResource(Resource):
             "merchant_name": safe_str(plan.merchant.business_name or plan.merchant.full_name),
             "merchant_phone": safe_str(plan.merchant.phone),
             "total_amount": safe_float(plan.total_amount),
-            "amount_paid": safe_float(plan.total_amount - plan.remaining_amount),
-            "amount_outstanding": safe_float(plan.remaining_amount),
+            "amount_paid": safe_float(plan.paid_to_date),
+            "amount_outstanding": safe_float(plan.outstanding_balance),
             "instalment_term": safe_int(plan.number_of_installments),
             "instalment_frequency": safe_str(plan.frequency),
             "instalment_amount": safe_float(plan.installment_amount),

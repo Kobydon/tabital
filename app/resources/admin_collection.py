@@ -303,7 +303,7 @@ class AdminGetOverduePaymentDetailResource(Resource):
                 "plan_id": plan.plan_id,
                 "plan_name": plan.plan_name,
                 "total_amount": float(plan.total_amount),
-                "remaining_amount": float(plan.remaining_amount),
+                "remaining_amount": plan.outstanding_balance,
                 "number_of_installments": plan.number_of_installments,
                 "paid_installments": plan.paid_installments
             },

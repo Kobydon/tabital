@@ -50,6 +50,18 @@ class InstalmentPlan(db.Model):
     customer = db.relationship('User', foreign_keys=[customer_id], backref='customer_instalments')
     transaction = db.relationship('Transaction', foreign_keys=[transaction_id], backref='instalment_plan')
     
+    # Balances always come from the ledger (CLAUDE.md §5.4). remaining_amount is kept
+    # only as the pre-ledger fallback and for old rows.
+    @property
+    def outstanding_balance(self):
+        from ..services import ledger
+        return float(ledger.plan_balance(self)["outstanding"])
+
+    @property
+    def paid_to_date(self):
+        from ..services import ledger
+        return float(ledger.plan_balance(self)["paid"])
+
     def generate_plan_id(self):
         """Generate a plan ID in format IP001, IP002, etc."""
         from sqlalchemy import func

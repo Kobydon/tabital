@@ -234,7 +234,7 @@ class AdminGetTransactionDetailResource(Resource):
             "instalment_plan": {
                 "plan_id": instalment_plan.plan_id if instalment_plan else None,
                 "total_amount": float(instalment_plan.total_amount) if instalment_plan else 0,
-                "remaining_amount": float(instalment_plan.remaining_amount) if instalment_plan else 0,
+                "remaining_amount": instalment_plan.outstanding_balance if instalment_plan else 0,
                 "number_of_installments": instalment_plan.number_of_installments if instalment_plan else 0,
                 "status": instalment_plan.status if instalment_plan else None
             } if instalment_plan else None,

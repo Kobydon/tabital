@@ -62,12 +62,12 @@ class AdminCustomerStatsResource(Resource):
         repeat_purchase_rate_growth = 5.2  # Sample value
         
         # Total Outstanding
-        total_outstanding = db.session.query(func.sum(InstalmentPlan.remaining_amount))\
-            .filter(InstalmentPlan.status == 'active').scalar() or 0
+        from app.services import ledger
+        total_outstanding = ledger.portfolio_totals(InstalmentPlan.status == 'active')['outstanding']
         
         # Outstanding growth
-        total_outstanding_last_30 = db.session.query(func.sum(InstalmentPlan.remaining_amount))\
-            .filter(InstalmentPlan.status == 'active', InstalmentPlan.created_at >= last_30_days).scalar() or 0
+        total_outstanding_last_30 = ledger.portfolio_totals(
+            InstalmentPlan.status == 'active', InstalmentPlan.created_at >= last_30_days)['outstanding']
         total_outstanding_previous = total_outstanding - total_outstanding_last_30
         outstanding_growth = round(((total_outstanding_last_30 - total_outstanding_previous) / total_outstanding_previous * 100) if total_outstanding_previous > 0 else 0, 1)
         
@@ -138,11 +138,10 @@ class AdminGetCustomersResource(Resource):
             total_financed = db.session.query(func.sum(InstalmentPlan.total_amount))\
                 .filter(InstalmentPlan.customer_id == customer.id).scalar() or 0
             
-            total_paid = db.session.query(func.sum(InstalmentPlan.amount_paid))\
-                .filter(InstalmentPlan.customer_id == customer.id).scalar() or 0
-            
-            outstanding = db.session.query(func.sum(InstalmentPlan.remaining_amount))\
-                .filter(InstalmentPlan.customer_id == customer.id, InstalmentPlan.status == 'active').scalar() or 0
+            from app.services import ledger
+            total_paid = ledger.portfolio_totals(InstalmentPlan.customer_id == customer.id)['paid']
+            outstanding = ledger.portfolio_totals(
+                InstalmentPlan.customer_id == customer.id, InstalmentPlan.status == 'active')['outstanding']
             
             active_plans = InstalmentPlan.query.filter_by(
                 customer_id=customer.id,
@@ -247,12 +246,12 @@ class AdminCustomerStatsResource(Resource):
         repeat_purchase_rate = (customers_with_multiple_plans / total_customers * 100) if total_customers > 0 else 0
         
         # Total Outstanding
-        total_outstanding = db.session.query(func.sum(InstalmentPlan.remaining_amount))\
-            .filter(InstalmentPlan.status == 'active').scalar() or 0
+        from app.services import ledger
+        total_outstanding = ledger.portfolio_totals(InstalmentPlan.status == 'active')['outstanding']
         
         # Calculate outstanding growth
-        total_outstanding_last_30 = db.session.query(func.sum(InstalmentPlan.remaining_amount))\
-            .filter(InstalmentPlan.status == 'active', InstalmentPlan.created_at >= last_30_days).scalar() or 0
+        total_outstanding_last_30 = ledger.portfolio_totals(
+            InstalmentPlan.status == 'active', InstalmentPlan.created_at >= last_30_days)['outstanding']
         total_outstanding_previous = total_outstanding - total_outstanding_last_30
         outstanding_growth = ((total_outstanding_last_30 - total_outstanding_previous) / total_outstanding_previous * 100) if total_outstanding_previous > 0 else 0
         
@@ -286,11 +285,10 @@ class AdminGetCustomerDetailResource(Resource):
         total_financed = db.session.query(func.sum(InstalmentPlan.total_amount))\
             .filter(InstalmentPlan.customer_id == customer.id).scalar() or 0
         
-        total_paid = db.session.query(func.sum(InstalmentPlan.total_amount - InstalmentPlan.remaining_amount))\
-            .filter(InstalmentPlan.customer_id == customer.id).scalar() or 0
-        
-        outstanding = db.session.query(func.sum(InstalmentPlan.remaining_amount))\
-            .filter(InstalmentPlan.customer_id == customer.id, InstalmentPlan.status == 'active').scalar() or 0
+        from app.services import ledger
+        total_paid = ledger.portfolio_totals(InstalmentPlan.customer_id == customer.id)['paid']
+        outstanding = ledger.portfolio_totals(
+            InstalmentPlan.customer_id == customer.id, InstalmentPlan.status == 'active')['outstanding']
         
         active_plans = InstalmentPlan.query.filter_by(
             customer_id=customer.id,
@@ -369,7 +367,7 @@ class AdminGetCustomerDetailResource(Resource):
                     "id": plan.id,
                     "plan_id": plan.plan_id,
                     "total_amount": float(plan.total_amount),
-                    "remaining_amount": float(plan.remaining_amount),
+                    "remaining_amount": plan.outstanding_balance,
                     "number_of_installments": plan.number_of_installments,
                     "status": plan.status
                 } for plan in active_plans]

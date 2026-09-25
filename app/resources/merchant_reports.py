@@ -516,8 +516,8 @@ class MerchantInstalmentReportResource(Resource):
         overdue_plans = len([p for p in plans if p.status == 'overdue'])
         
         total_value = sum(p.total_amount for p in plans)
-        total_received = sum(p.total_amount - p.remaining_amount for p in plans)
-        total_remaining = sum(p.remaining_amount for p in plans)
+        total_received = sum(p.paid_to_date for p in plans)
+        total_remaining = sum(p.outstanding_balance for p in plans)
         
         # Average plan size
         avg_plan_size = total_value / total_plans if total_plans > 0 else 0

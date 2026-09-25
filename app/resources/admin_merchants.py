@@ -208,13 +208,12 @@ class AdminGetMerchantDetailResource(Resource):
             .filter(InstalmentPlan.merchant_id == merchant.id,
                    InstalmentPlan.status == 'completed').scalar() or 0
         
-        total_outstanding = db.session.query(func.sum(InstalmentPlan.remaining_amount))\
-            .filter(InstalmentPlan.merchant_id == merchant.id,
-                   InstalmentPlan.status == 'active').scalar() or 0
-        
-        total_commission = db.session.query(func.sum(InstalmentPlan.commission_amount))\
-            .filter(InstalmentPlan.merchant_id == merchant.id,
-                   InstalmentPlan.status == 'completed').scalar() or 0
+        # Outstanding balances and MDR earned come from the ledger
+        from app.services import ledger
+        total_outstanding = ledger.portfolio_totals(
+            InstalmentPlan.merchant_id == merchant.id, InstalmentPlan.status == 'active')['outstanding']
+        total_commission = ledger.portfolio_totals(
+            InstalmentPlan.merchant_id == merchant.id)['merchant_fees']
         
         total_products = merchant.total_products or 0
         active_plans = InstalmentPlan.query.filter_by(

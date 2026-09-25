@@ -206,7 +206,7 @@ class AdminGetProductDetailResource(Resource):
                 "id": p.id,
                 "plan_id": p.plan_id,
                 "total_amount": float(p.total_amount),
-                "remaining_amount": float(p.remaining_amount),
+                "remaining_amount": p.outstanding_balance,
                 "number_of_installments": p.number_of_installments,
                 "installment_amount": float(p.installment_amount),
                 "paid_installments": p.paid_installments,

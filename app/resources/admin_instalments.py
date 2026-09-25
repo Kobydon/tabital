@@ -60,10 +60,11 @@ class AdminInstalmentStatsResource(Resource):
         total_defaulted_plans = InstalmentPlan.query.filter_by(status='defaulted').count()
         
         # Total Outstanding Amount
-        total_outstanding = db.session.query(func.sum(InstalmentPlan.remaining_amount)).scalar() or 0
-        
-        # Total Paid Amount
-        total_paid = db.session.query(func.sum(InstalmentPlan.total_amount - InstalmentPlan.remaining_amount)).scalar() or 0
+        # Outstanding and paid come from the ledger
+        from app.services import ledger
+        portfolio = ledger.portfolio_totals()
+        total_outstanding = portfolio['outstanding']
+        total_paid = portfolio['paid']
         
         # Total Financed
         total_financed = db.session.query(func.sum(InstalmentPlan.total_amount)).scalar() or 0
@@ -163,8 +164,8 @@ class AdminGetInstalmentPlansResource(Resource):
                 "plan_name": plan.plan_name,
                 "total_amount": float(plan.total_amount),
                 "down_payment": float(plan.down_payment),
-                "remaining_amount": float(plan.remaining_amount),
-                "paid_amount": float(plan.total_amount - plan.remaining_amount),
+                "remaining_amount": plan.outstanding_balance,
+                "paid_amount": float(plan.paid_to_date),
                 "number_of_installments": plan.number_of_installments,
                 "installment_amount": float(plan.installment_amount),
                 "paid_installments": plan.paid_installments,
@@ -247,8 +248,8 @@ class AdminGetInstalmentPlanDetailResource(Resource):
                 "description": plan.description,
                 "total_amount": float(plan.total_amount),
                 "down_payment": float(plan.down_payment),
-                "remaining_amount": float(plan.remaining_amount),
-                "paid_amount": float(plan.total_amount - plan.remaining_amount),
+                "remaining_amount": plan.outstanding_balance,
+                "paid_amount": float(plan.paid_to_date),
                 "number_of_installments": plan.number_of_installments,
                 "installment_amount": float(plan.installment_amount),
                 "frequency": plan.frequency,
@@ -459,7 +460,7 @@ class AdminExportInstalmentsResource(Resource):
                 merchant.business_name if merchant else "N/A",
                 plan.plan_name,
                 plan.total_amount,
-                plan.remaining_amount,
+                plan.outstanding_balance,
                 plan.number_of_installments,
                 plan.installment_amount,
                 plan.paid_installments,
