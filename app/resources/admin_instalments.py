@@ -8,12 +8,14 @@ from datetime import datetime, timedelta
 from sqlalchemy import func, or_
 
 
-def mark_instalment_paid(payment, payment_method, payment_reference, amount_received=None):
-    """Record a confirmed payment and update the plan.
+def mark_instalment_paid(payment, payment_method, payment_reference, amount_received=None, user=None):
+    """Record a confirmed payment, write it to the ledger, and update the plan.
 
     remaining_amount tracks the financed balance, which excludes Payment 1
     (down payment + delivery fee), so only instalments 2..N reduce it.
     """
+    from app.services import ledger
+
     payment.status = 'paid'
     payment.paid_date = datetime.now()
     payment.paid_amount = amount_received if amount_received else payment.get_total_due()
@@ -24,6 +26,7 @@ def mark_instalment_paid(payment, payment_method, payment_reference, amount_rece
 
     plan = InstalmentPlan.query.get(payment.plan_id)
     if plan:
+        ledger.payment_received(plan, payment, payment.paid_amount, payment_reference, user=user)
         plan.paid_installments = (plan.paid_installments or 0) + 1
         if payment.installment_number > 1:
             plan.remaining_amount = round((plan.remaining_amount or 0) - payment.amount, 2)
@@ -217,7 +220,26 @@ class AdminGetInstalmentPlanDetailResource(Resource):
                 "payment_reference": payment.payment_reference
             })
         
+        from app.services import ledger
+        from app.models.ledger import LedgerEntry
+
+        entries = plan.ledger_entries.order_by(LedgerEntry.created_at, LedgerEntry.id).all()
+
         return {
+            "ledger": {
+                "customer_balance": float(ledger.customer_balance(plan)),
+                "entries": [{
+                    "id": e.id,
+                    "account": e.account,
+                    "entry_type": e.entry_type,
+                    "amount": float(ledger.to_cedis(e.amount_pesewas)),
+                    "payment_id": e.payment_id,
+                    "reference": e.reference,
+                    "note": e.note,
+                    "created_by": e.created_by,
+                    "created_at": e.created_at.isoformat() if e.created_at else None
+                } for e in entries]
+            },
             "plan": {
                 "id": plan.id,
                 "plan_id": plan.plan_id,
@@ -308,8 +330,9 @@ class AdminApplyLateFeeResource(Resource):
         if payment.late_fee > 0:
             return {"error": "Late fee already applied"}, 400
         
-        payment.apply_late_fee()
-        
+        if not payment.apply_late_fee():
+            return {"error": "Late fees apply from the day after the due date"}, 400
+
         return {
             "message": "Late fee applied successfully",
             "payment_id": payment.payment_id,
@@ -327,18 +350,26 @@ class AdminWaiveLateFeeResource(Resource):
         if current_admin.role != 'admin':
             return {"error": "Unauthorized"}, 403
         
-        data = request.get_json()
-        reason = data.get('reason', '')
-        
+        from app.services import ledger
+
+        data = request.get_json() or {}
+        reason = (data.get('reason') or '').strip()
+
         payment = InstalmentPayment.query.get(payment_id)
         if not payment:
             return {"error": "Payment not found"}, 404
-        
-        if payment.late_fee == 0:
+
+        if not payment.late_fee:
             return {"error": "No late fee to waive"}, 400
-        
+        if payment.late_fee_paid:
+            return {"error": "This late fee was already paid; issue a refund instead"}, 400
+        if not reason:
+            return {"error": "A reason is required to waive a late fee"}, 400
+
+        plan = InstalmentPlan.query.get(payment.plan_id)
+        ledger.late_fee_waived(plan, payment, payment.late_fee, reason=reason, user=current_admin)
+        # The instalment stays overdue; late_fee_applied_date stays set so the fee isn't charged again
         payment.late_fee = 0
-        payment.late_fee_paid = True
         db.session.commit()
         
         return {
@@ -372,7 +403,7 @@ class AdminMarkPaymentAsPaidResource(Resource):
         if not payment_reference:
             return {"error": "Enter the MoMo/bank reference of the money received"}, 400
 
-        mark_instalment_paid(payment, payment_method, payment_reference)
+        mark_instalment_paid(payment, payment_method, payment_reference, user=current_admin)
         db.session.commit()
         
         return {

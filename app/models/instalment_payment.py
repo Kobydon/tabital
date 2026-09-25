@@ -58,13 +58,15 @@ class InstalmentPayment(db.Model):
 
         # Overdue from the calendar day after the due date
         if today.date() > self.due_date.date():
-            # Apply late fee only if not already applied
-            if not self.late_fee and not self.late_fee_paid:
+            # Apply late fee only once per instalment (a waived fee must not be re-charged)
+            if not self.late_fee and not self.late_fee_paid and self.late_fee_applied_date is None:
                 pct = Decimal(str(SystemSetting.get_value("late_fee_percentage", 10)))
                 fee = (Decimal(str(self.amount)) * pct / 100).quantize(Decimal("0.01"), ROUND_HALF_UP)
+                from ..services import ledger
                 self.late_fee = float(fee)
                 self.late_fee_applied_date = today
                 self.status = 'overdue'
+                ledger.late_fee_charged(self.plan, self, fee)
                 db.session.commit()
                 return True
 
@@ -82,7 +84,8 @@ class InstalmentPayment(db.Model):
             InstalmentPayment.status.in_(['pending', 'overdue']),
             InstalmentPayment.due_date < start_of_today,
             InstalmentPayment.late_fee == 0,
-            InstalmentPayment.late_fee_paid == False
+            InstalmentPayment.late_fee_paid == False,
+            InstalmentPayment.late_fee_applied_date.is_(None)
         ).all()
         
         applied_count = 0

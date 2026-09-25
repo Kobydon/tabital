@@ -611,6 +611,9 @@ class AdminApproveOrderResource(Resource):
             db.session.flush()
 
 
+            from ..services import ledger
+            down_payment_row = None
+
             for item in stored_schedule:
                 number = int(item['installment_number'])
                 amount = float(plan_engine.money(item['amount']))
@@ -624,7 +627,7 @@ class AdminApproveOrderResource(Resource):
                 else:
                     status, paid_date, paid_amount = 'pending', None, 0
 
-                db.session.add(InstalmentPayment(
+                row = InstalmentPayment(
                     payment_id=InstalmentPayment.generate_payment_id(InstalmentPayment),
                     plan_id=instalment_plan.id,
                     installment_number=number,
@@ -637,8 +640,11 @@ class AdminApproveOrderResource(Resource):
                     payment_reference=down_payment_reference if is_down_payment and down_payment_received else None,
                     late_fee=0,
                     late_fee_paid=False
-                ))
+                )
+                db.session.add(row)
                 db.session.flush()
+                if is_down_payment:
+                    down_payment_row = row
 
             transaction = Transaction(
                 transaction_id=Transaction.generate_transaction_id(Transaction),
@@ -658,6 +664,13 @@ class AdminApproveOrderResource(Resource):
             db.session.add(transaction)
             db.session.flush()
             instalment_plan.transaction_id = transaction.id
+
+            # Ledger: the contract, the merchant side, and the down payment if already received
+            ledger.open_plan(instalment_plan, order.total_payable, commission_amount,
+                             payout_amount, user=current_admin)
+            if down_payment_received and down_payment_row is not None:
+                ledger.payment_received(instalment_plan, down_payment_row, down_payment_row.amount,
+                                        down_payment_reference, user=current_admin)
 
             db.session.commit()
         except Exception as e:

@@ -385,7 +385,8 @@ class AdminMarkPaymentReceivedResource(Resource):
             # Partial payments need the ledger (Phase 1); don't mark a short payment as paid
             return {"error": f"Amount received is less than the {total_due:.2f} due"}, 400
 
-        mark_instalment_paid(payment, payment_method, payment_reference, amount_received or None)
+        mark_instalment_paid(payment, payment_method, payment_reference, amount_received or None,
+                             user=current_admin)
         db.session.commit()
         
         return {

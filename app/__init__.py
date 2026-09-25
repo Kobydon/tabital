@@ -5,6 +5,7 @@ from flask_migrate import Migrate
 from .config import Config
 from .extensions import db, ma, guard, mail
 from .models.user import User
+from .models import ledger as _ledger_model  # noqa: F401  (registers the ledger table)
 from .routes import register_routes
 
 
@@ -55,3 +56,36 @@ def register_commands(app):
         db.session.add(admin)
         db.session.commit()
         click.echo(f"Admin {phone} created")
+
+    @app.cli.command("ledger-backfill")
+    @click.option("--dry-run", is_flag=True, help="Report what would be written without saving")
+    def ledger_backfill(dry_run):
+        """Create ledger entries for plans made before the ledger existed.
+
+        Uses the recorded plan and payment rows: contract total, paid instalments and
+        late fees. Plans that already have ledger entries are skipped.
+        """
+        from decimal import Decimal
+        from .models.instalment import InstalmentPlan
+        from .models.instalment_payment import InstalmentPayment
+        from .services import ledger
+
+        created = 0
+        for plan in InstalmentPlan.query.order_by(InstalmentPlan.id).all():
+            if ledger.has_entries(plan):
+                continue
+            ledger.record(plan, "plan_opened", plan.total_amount, note="Backfill: contract total payable")
+            payments = InstalmentPayment.query.filter_by(plan_id=plan.id).all()
+            for p in payments:
+                if p.late_fee and (p.late_fee_paid or p.status != 'paid'):
+                    ledger.late_fee_charged(plan, p, p.late_fee)
+                if p.status == 'paid':
+                    paid = p.paid_amount or (Decimal(str(p.amount)) + Decimal(str(p.late_fee or 0)))
+                    ledger.payment_received(plan, p, paid, p.payment_reference or "backfill")
+            created += 1
+        if dry_run:
+            db.session.rollback()
+            click.echo(f"Dry run: would backfill {created} plan(s)")
+        else:
+            db.session.commit()
+            click.echo(f"Backfilled {created} plan(s)")
