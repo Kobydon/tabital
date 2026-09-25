@@ -14,7 +14,7 @@ from typing import List, Optional
 CENT = Decimal("0.01")
 
 RULES = {
-    "version": "2026-09-26.1",
+    "version": "2026-09-26.2",
     # Eligibility (hard declines)
     "min_age": 18,
     "min_monthly_salary": 2000,          # GHS, §2
@@ -28,12 +28,16 @@ RULES = {
     },
     # Promotion to low: at least this many plans completed with no late payment
     "low_tier_min_clean_plans": 1,
-    # Demotion to high
-    "high_tier_if_employment_months_below": 12,
+    # Demotion to high (founder, 2026-09-26: under 16 months employed, or 2+ late payments)
+    "high_tier_if_employment_months_below": 16,
     "high_tier_if_late_payments_at_least": 2,
-    # Dynamic limit (D9): each plan completed with no late payment adds this x salary, up to the cap
+    # Dynamic limit (D9, founder 2026-09-26): each plan completed with no late payment adds
+    # 0.1 x salary (capped at +0.5); each instalment paid late takes 0.5 x salary off.
+    # The multiplier never goes below min_multiplier.
     "growth_per_clean_plan": "0.1",
     "growth_cap": "0.5",
+    "reduction_per_late_payment": "0.5",
+    "min_multiplier": "0",
     # Extended 6/12-month plans unlock after this many consecutive on-time purchases (D7).
     # They stay off until their terms are set (D12); this only reports eligibility.
     "extended_plan_min_consecutive_clean_plans": 3,
@@ -155,13 +159,21 @@ def assess(f: Facts, r=None) -> Decision:
     terms = r["tiers"][tier]
     multiplier = Decimal(str(terms["limit_multiplier"]))
 
-    # ---- dynamic limit (D9): grow with clean history, never for high tier ----
+    # ---- dynamic limit (D9): grow with clean history (never for high tier), shrink with late payments ----
     if tier != "high" and f.completed_clean_plans:
         growth = min(Decimal(str(r["growth_per_clean_plan"])) * f.completed_clean_plans,
                      Decimal(str(r["growth_cap"])))
         if growth:
             multiplier += growth
             reasons.append(f"Limit increased by {growth} x salary for {f.completed_clean_plans} plan(s) paid on time")
+    if f.late_payments_total:
+        reduction = Decimal(str(r["reduction_per_late_payment"])) * f.late_payments_total
+        floor = Decimal(str(r["min_multiplier"]))
+        new_multiplier = max(multiplier - reduction, floor)
+        if new_multiplier != multiplier:
+            reasons.append(f"Limit reduced by {multiplier - new_multiplier} x salary for "
+                           f"{f.late_payments_total} late payment(s)")
+        multiplier = new_multiplier
 
     credit_limit = (f.monthly_salary * multiplier).quantize(CENT, ROUND_HALF_UP)
     available = max(credit_limit - f.outstanding_balance, Decimal("0.00")).quantize(CENT)

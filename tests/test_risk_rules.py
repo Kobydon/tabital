@@ -86,6 +86,28 @@ def test_late_payment_history_demotes_to_high():
     assert d.tier == "high"
 
 
+def test_employment_under_16_months_is_high_tier():
+    """Founder decision 2026-09-26: the high tier applies below 16 months employed."""
+    assert assess(good(employment_start=date(2025, 7, 1))).tier == "high"     # ~14 months
+    assert assess(good(employment_start=date(2025, 5, 1))).tier == "medium"   # 16 months
+
+
+def test_each_late_payment_takes_half_a_salary_off_the_limit():
+    """Founder decision 2026-09-26: -0.5 x salary per instalment paid late."""
+    # 2 clean plans and 1 late payment: not low tier (needs zero late payments), so medium:
+    # 1.0 + 0.2 growth - 0.5 = 0.7 x salary
+    d = assess(good(completed_clean_plans=2, consecutive_clean_plans=0, late_payments_total=1))
+    assert d.tier == "medium"                       # low tier needs no late payments at all
+    assert d.limit_multiplier == D("0.7")           # medium 1.0 + 0.2 growth - 0.5
+    assert d.credit_limit == D("3500.00")
+    assert any("reduced by 0.5" in r for r in d.reasons)
+
+
+def test_limit_never_goes_below_zero():
+    d = assess(good(late_payments_total=5))         # high tier 0.5 - 2.5 -> floored at 0
+    assert d.eligible and d.limit_multiplier == D("0") and d.credit_limit == D("0.00")
+
+
 def test_extended_plan_eligibility_after_three_clean_plans():
     assert not assess(good(completed_clean_plans=2, consecutive_clean_plans=2)).extended_plans_eligible
     assert assess(good(completed_clean_plans=3, consecutive_clean_plans=3)).extended_plans_eligible
