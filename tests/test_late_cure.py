@@ -126,6 +126,19 @@ def test_unpaid_past_window_counts(customer):
     assert risk.facts_for(customer, today=TODAY).late_payments_total == 1
 
 
+def test_uncured_late_payment_expires_after_12_months(customer):
+    late_instalment(customer, days_late_paid=20)                     # due 2026-08-01, not cured
+    assert risk.assess(risk.facts_for(customer, today=TODAY)).credit_limit == D("2500.00")
+
+    later = datetime(2027, 8, 2).date()                              # 12 months after the due date
+    f = risk.facts_for(customer, today=later)
+    assert f.late_payments_total == 0 and f.late_payments_expired == 1
+    assert f.completed_clean_plans == 0                              # still no growth from that plan
+    d = risk.assess(f)
+    assert d.credit_limit == D("5000.00")                            # back to medium 1.0
+    assert any("older than 12 months" in r for r in d.reasons)
+
+
 def test_two_cured_payments_dont_make_high_tier(customer):
     late_instalment(customer, days_late_paid=2)
     late_instalment(customer, days_late_paid=6)

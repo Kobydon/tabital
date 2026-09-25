@@ -64,6 +64,23 @@ def late_fee_waived(plan, payment, fee, reason=None, user=None):
                   note=(reason or "Late fee waived")[:255], user=user)
 
 
+def late_fees_net(plan) -> Decimal:
+    """Late fees charged on a plan minus those waived, in GHS."""
+    total = db.session.query(func.coalesce(func.sum(LedgerEntry.amount_pesewas), 0)).filter(
+        LedgerEntry.plan_id == plan.id,
+        LedgerEntry.entry_type.in_([LedgerEntry.LATE_FEE_CHARGED, LedgerEntry.LATE_FEE_WAIVED]),
+    ).scalar()
+    return to_cedis(total)
+
+
+def late_fee_cap_remaining(plan) -> Decimal:
+    """How much more late fee this plan may be charged (cap: % of the order's total payable)."""
+    from ..models.system_settings import SystemSetting
+    cap_pct = Decimal(str(SystemSetting.get_value("late_fee_cap_percentage", 25)))
+    cap = (Decimal(str(plan.total_amount or 0)) * cap_pct / 100).quantize(CENT, ROUND_HALF_UP)
+    return max(cap - late_fees_net(plan), Decimal("0.00"))
+
+
 def customer_balance(plan) -> Decimal:
     """What the customer still owes on this plan, in GHS, including unpaid late fees."""
     total = db.session.query(func.coalesce(func.sum(LedgerEntry.amount_pesewas), 0)).filter(

@@ -43,7 +43,9 @@ class InstalmentPayment(db.Model):
     def apply_late_fee(self):
         """
         Apply the late fee the day after the due date (no grace period, CLAUDE.md §13.1 D5).
-        The fee is late_fee_percentage (default 10%) of the instalment amount (§6.2).
+        The fee is late_fee_percentage (default 10%) of the instalment amount (§6.2), capped so
+        a plan's total late fees never exceed late_fee_cap_percentage (default 25%) of the
+        order's total payable (founder, 2026-09-26). Waived fees don't count toward the cap.
         """
         from decimal import Decimal, ROUND_HALF_UP
         from .system_settings import SystemSetting
@@ -60,13 +62,16 @@ class InstalmentPayment(db.Model):
         if today.date() > self.due_date.date():
             # Apply late fee only once per instalment (a waived fee must not be re-charged)
             if not self.late_fee and not self.late_fee_paid and self.late_fee_applied_date is None:
+                from ..services import ledger
                 pct = Decimal(str(SystemSetting.get_value("late_fee_percentage", 10)))
                 fee = (Decimal(str(self.amount)) * pct / 100).quantize(Decimal("0.01"), ROUND_HALF_UP)
-                from ..services import ledger
+                fee = min(fee, ledger.late_fee_cap_remaining(self.plan))
+                # Still overdue (and recorded as late) even when the cap leaves no fee to charge
                 self.late_fee = float(fee)
                 self.late_fee_applied_date = today
                 self.status = 'overdue'
-                ledger.late_fee_charged(self.plan, self, fee)
+                if fee > 0:
+                    ledger.late_fee_charged(self.plan, self, fee)
                 db.session.commit()
                 return True
 

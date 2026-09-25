@@ -58,6 +58,11 @@ def init_system_settings():
             "type": "number",
             "description": "No grace period: late fee applies the day after the due date (CLAUDE.md 13.1 D5)"
         },
+        "late_fee_cap_percentage": {
+            "value": 25,
+            "type": "number",
+            "description": "Total late fees on a plan can't exceed this % of the order's total payable"
+        },
         "down_payment_percentage_short_plans": {
             "value": 50,
             "type": "number",
