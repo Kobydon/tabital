@@ -32,9 +32,19 @@ class PurchaseOrder(db.Model):
     # Payment Schedule (JSON)
     payment_schedule = db.Column(db.Text)  # ✅ This stores the schedule
     
-    # Status
+    # Status: awaiting_payment -> pending (down payment received, awaiting approval)
+    #         -> approved / rejected -> completed
     status = db.Column(db.String(50), default='pending')
     admin_notes = db.Column(db.Text)
+
+    # Down payment collected at checkout (Payment 1 = down payment + delivery fee)
+    down_payment_status = db.Column(db.String(30), default='unpaid')   # unpaid, paid
+    down_payment_reference = db.Column(db.String(100))
+    down_payment_method = db.Column(db.String(50))
+    down_payment_paid_at = db.Column(db.DateTime)
+    # Set when a paid order is rejected: refunded, refund_failed
+    refund_status = db.Column(db.String(30))
+    refund_reference = db.Column(db.String(100))
     
     # Delivery
     delivery_address = db.Column(db.String(500))

@@ -79,8 +79,12 @@ def apply_verified_transaction(intent, data):
         intent.status = PaymentIntent.AMOUNT_MISMATCH
         return 'amount_mismatch'
 
-    payment = intent.payment
     intent.paid_at = datetime.utcnow()
+
+    if intent.purpose == PaymentIntent.DOWN_PAYMENT:
+        return _apply_down_payment(intent)
+
+    payment = intent.payment
     if payment.status == 'paid':
         # Already settled another way (admin or another attempt): flag for refund review
         intent.status = PaymentIntent.SUCCESS
@@ -90,4 +94,29 @@ def apply_verified_transaction(intent, data):
     mark_instalment_paid(payment, f"paystack_{intent.channel or 'unknown'}", intent.reference,
                          amount_received=amount / 100)
     intent.status = PaymentIntent.SUCCESS
+    return 'applied'
+
+
+def _apply_down_payment(intent):
+    """Checkout down payment confirmed: the order moves to 'pending' (awaiting admin approval)."""
+    from ..models.payment_intent import PaymentIntent
+
+    order = intent.order
+    intent.status = PaymentIntent.SUCCESS
+    if order.down_payment_status == 'paid':
+        # Paid twice (e.g. two checkout tabs): keep the first, flag this one for refund
+        intent.gateway_response = 'DUPLICATE: down payment already received; review for refund'
+        return 'duplicate_payment'
+
+    order.down_payment_status = 'paid'
+    order.down_payment_reference = intent.reference
+    order.down_payment_method = f"paystack_{intent.channel or 'unknown'}"
+    order.down_payment_paid_at = datetime.utcnow()
+    if order.status == 'awaiting_payment':
+        order.status = 'pending'
+        return 'applied'
+    if order.status in ('rejected', 'cancelled'):
+        # Money arrived after the order was closed: it must go back to the customer
+        order.refund_status = 'refund_required'
+        return 'refund_required'
     return 'applied'

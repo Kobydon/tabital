@@ -2,7 +2,25 @@
 
 Tabital collects the down payment and instalments through Paystack (card and mobile money, GHS).
 
-## How a payment works
+## Checkout: the down payment is paid first
+
+1. The customer places an order in the Shop.
+2. `POST /customer/purchase` prices it on the server and saves it as `awaiting_payment`. It then starts a Paystack transaction for **Payment 1** (down payment + delivery fee) and returns Paystack's `authorization_url`.
+3. Once Paystack confirms the charge (callback verify or webhook), the order becomes `pending`. That means it's paid and waiting for admin approval.
+4. The admin can't approve an order until its down payment is paid. On approval, the plan starts with Payment 1 already paid, and the ledger records it.
+5. If the admin rejects a paid order, the down payment is refunded through Paystack (`POST /refund`). If the refund call fails, the order shows `refund_failed` and someone has to refund it by hand.
+6. If the first attempt fails, the customer can pay again from **My Orders** (`POST /customer/orders/<id>/pay`).
+
+Some cases are flagged rather than handled automatically:
+
+| Case | What happens |
+|---|---|
+| Customer pays twice for the same order | The second payment is flagged for refund |
+| Money arrives after the order was rejected | The order shows `refund_required` |
+
+Without Paystack configured, orders go straight to `pending`, and the admin records the down-payment reference by hand when approving.
+
+## Instalments after approval
 
 1. The customer opens **Make Payment** and clicks **Pay with Card or MoMo**.
 2. `POST /customer/payments/paystack/initialize` works out the amount due on the server (the next unpaid instalment plus any unpaid late fee), creates a `payment_intents` row, and starts a Paystack transaction.

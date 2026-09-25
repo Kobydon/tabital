@@ -53,6 +53,21 @@ def test_errors_raise_paystack_error(app_ctx, monkeypatch):
         paystack.verify_transaction("nope")
 
 
+def test_refund_posts_transaction_reference(app_ctx, monkeypatch):
+    calls = {}
+
+    def fake_post(url, json=None, headers=None, timeout=None):
+        calls.update(url=url, json=json)
+        return FakeResponse(200, {"status": True, "data": {"id": 42, "status": "pending"}})
+
+    monkeypatch.setattr(paystack.requests, "post", fake_post)
+    data = paystack.refund_transaction("TBO-1-abc", reason="Order rejected")
+    assert calls["url"] == "https://api.paystack.co/refund"
+    assert calls["json"]["transaction"] == "TBO-1-abc"
+    assert "amount" not in calls["json"]        # full refund
+    assert data["id"] == 42
+
+
 def test_signature_check(app_ctx):
     raw = b'{"event":"charge.success"}'
     good = hmac.new(FAKE_SECRET.encode(), raw, hashlib.sha512).hexdigest()

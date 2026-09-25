@@ -284,7 +284,8 @@ from .resources.merchant_orders import (
 )
 from .resources.customer_purchase import (
     CustomerPurchaseResource,
-    CustomerGetOrdersResource
+    CustomerGetOrdersResource,
+    CustomerPayOrderResource
 )
 # routes.py - Add these imports
 from .resources.customer_product import (
@@ -685,6 +686,7 @@ def register_routes(app):
     # ============================================
     api.add_resource(CustomerPurchaseResource, "/customer/purchase")
     api.add_resource(CustomerGetOrdersResource, "/customer/orders")
+    api.add_resource(CustomerPayOrderResource, "/customer/orders/<int:order_id>/pay")
 
 
 

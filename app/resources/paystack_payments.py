@@ -31,13 +31,16 @@ def _new_reference(plan, payment):
 def _intent_view(intent, outcome=None):
     return {
         "reference": intent.reference,
+        "purpose": intent.purpose,
         "status": intent.status,
         "outcome": outcome,
         "amount": intent.amount_pesewas / 100,
         "currency": intent.currency,
         "channel": intent.channel,
         "plan_id": intent.plan_id,
-        "installment_number": intent.payment.installment_number if intent.payment else None,
+        "order_id": intent.order.order_id if intent.order else None,
+        "order_status": intent.order.status if intent.order else None,
+        "installment_number": intent.payment.installment_number if intent.payment else 1,
     }
 
 
@@ -69,6 +72,7 @@ class CustomerPaystackInitializeResource(Resource):
         amount_pesewas = to_pesewas(payment.get_total_due())
         intent = PaymentIntent(
             reference=_new_reference(plan, payment),
+            purpose=PaymentIntent.INSTALMENT,
             plan_id=plan.id,
             payment_id=payment.id,
             customer_id=customer.id,

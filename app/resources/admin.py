@@ -541,9 +541,11 @@ class AdminApproveOrderResource(Resource):
         if not order:
             return {"error": "Order not found"}, 404
         
+        if order.status == 'awaiting_payment':
+            return {"error": "The customer hasn't paid the down payment yet"}, 400
         if order.status != 'pending':
             return {"error": f"Order already {order.status}"}, 400
-        
+
         data = request.get_json() or {}
 
         # Order status is committed together with the plan, payments and transaction below
@@ -573,10 +575,15 @@ class AdminApproveOrderResource(Resource):
         commission_amount = (product_value * mdr).quantize(plan_engine.CENT)
         payout_amount = float(product_value - commission_amount)
         
-        # Payment 1 (down payment + delivery fee) is only marked paid when the admin
-        # records the reference for money actually received. Otherwise it waits for verification.
-        down_payment_reference = (data.get('down_payment_reference') or '').strip()
-        down_payment_method = (data.get('down_payment_method') or 'mobile_money').strip()
+        # Payment 1 (down payment + delivery fee): normally already collected at checkout
+        # through Paystack. In the manual fallback (no Paystack), it's only marked paid when
+        # the admin records the reference for money received; otherwise it waits for verification.
+        if order.down_payment_status == 'paid':
+            down_payment_reference = order.down_payment_reference
+            down_payment_method = order.down_payment_method or 'paystack'
+        else:
+            down_payment_reference = (data.get('down_payment_reference') or '').strip()
+            down_payment_method = (data.get('down_payment_method') or 'mobile_money').strip()
         down_payment_received = bool(down_payment_reference)
 
         # Orders placed before server-side pricing carry a browser-built schedule

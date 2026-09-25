@@ -6,9 +6,10 @@ from ..models.product import Product
 from ..models.user import User
 from ..models.system_settings import SystemSetting
 from ..extensions import db
-from ..services import plan_engine
+from ..services import plan_engine, paystack
 from datetime import datetime
 import json
+import uuid
 
 def safe_str(v): return v if v is not None else ""
 
@@ -69,21 +70,104 @@ class CustomerPurchaseResource(Resource):
             installment_amount=float(plan["installment_amount"]),
             total_payable=float(plan["total_payable"]),
             payment_schedule=json.dumps(plan_engine.schedule_to_json(plan["schedule"])),
-            status='pending',
+            # With Paystack, Payment 1 is collected now and the order only reaches the
+            # approval queue once it's paid. Without Paystack, it goes straight to approval
+            # and the admin records the down payment reference (manual fallback).
+            status='awaiting_payment' if paystack.is_configured() else 'pending',
             delivery_address=delivery_address
         )
 
         db.session.add(order)
         db.session.commit()
 
-        return {
-            "message": "Order submitted for approval",
+        body = {
             "order_id": order.order_id,
-            "status": "pending",
+            "id": order.id,
+            "status": order.status,
             "due_now": float(plan["due_now"]),
             "total_payable": float(plan["total_payable"]),
             "payment_schedule": plan_engine.schedule_to_json(plan["schedule"])
-        }, 201
+        }
+
+        if order.status != 'awaiting_payment':
+            body["message"] = "Order submitted for approval"
+            return body, 201
+
+        try:
+            checkout = start_down_payment(order, current_customer)
+        except paystack.PaystackError:
+            # Order is kept; the customer can retry from My Orders
+            body["message"] = "Order saved, but we couldn't open the payment page. Pay the down payment from My Orders."
+            body["payment_error"] = True
+            return body, 201
+
+        body.update(checkout)
+        body["message"] = "Pay the down payment to send your order for approval"
+        return body, 201
+
+
+def start_down_payment(order, customer):
+    """Start a Paystack payment for Payment 1 (down payment + delivery fee) of an order.
+
+    The amount is taken from the order's stored, server-built schedule. Commits the intent.
+    Raises paystack.PaystackError if Paystack can't be reached.
+    """
+    from flask import current_app
+    from ..models.payment_intent import PaymentIntent
+    from ..services.ledger import to_pesewas
+    from .paystack_payments import _customer_email
+
+    schedule = json.loads(order.payment_schedule)
+    amount_pesewas = to_pesewas(schedule[0]["amount"])
+    intent = PaymentIntent(
+        reference=f"TBO-{order.id}-{uuid.uuid4().hex[:12]}",
+        purpose=PaymentIntent.DOWN_PAYMENT,
+        order_id=order.id,
+        customer_id=customer.id,
+        amount_pesewas=amount_pesewas,
+        currency='GHS',
+    )
+    db.session.add(intent)
+    db.session.flush()
+    try:
+        result = paystack.initialize_transaction(
+            email=_customer_email(customer),
+            amount_pesewas=amount_pesewas,
+            reference=intent.reference,
+            callback_url=current_app.config.get("PAYSTACK_CALLBACK_URL"),
+            metadata={"order_id": order.order_id, "purpose": "down_payment", "customer_id": customer.id},
+        )
+    except paystack.PaystackError as e:
+        db.session.rollback()
+        current_app.logger.warning("Paystack initialize (down payment) failed: %s", e)
+        raise
+    db.session.commit()
+    return {
+        "reference": intent.reference,
+        "authorization_url": result.get("authorization_url"),
+        "amount": amount_pesewas / 100,
+        "currency": "GHS",
+    }
+
+
+class CustomerPayOrderResource(Resource):
+    @auth_required
+    def post(self, order_id):
+        """Retry paying the down payment for an order that's still awaiting payment."""
+        customer = current_user()
+        if customer.role != 'customer':
+            return {"error": "Unauthorized"}, 403
+        order = PurchaseOrder.query.filter_by(id=order_id, customer_id=customer.id).first()
+        if not order:
+            return {"error": "Order not found"}, 404
+        if order.status != 'awaiting_payment' or order.down_payment_status == 'paid':
+            return {"error": "This order has no down payment due"}, 400
+        if not paystack.is_configured():
+            return {"error": "Online payment isn't available right now. Please try again later."}, 503
+        try:
+            return start_down_payment(order, customer), 201
+        except paystack.PaystackError:
+            return {"error": "Could not start the payment. Please try again."}, 502
 
 
 class CustomerGetOrdersResource(Resource):
@@ -111,6 +195,9 @@ class CustomerGetOrdersResource(Resource):
             "number_of_installments": o.number_of_installments,
             # "remaining_balance": o.remaining_balance,
             "status": o.status,
+            "down_payment_status": o.down_payment_status or 'unpaid',
+            "due_now": (json.loads(o.payment_schedule)[0]["amount"] if o.payment_schedule else o.down_payment_amount),
+            "refund_status": o.refund_status,
             "payment_schedule": json.loads(o.payment_schedule) if o.payment_schedule else [],
             "delivery_address": o.delivery_address,
             "delivery_status": o.delivery_status,

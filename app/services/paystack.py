@@ -72,6 +72,26 @@ def verify_transaction(reference):
     return payload["data"]
 
 
+def refund_transaction(reference, amount_pesewas=None, reason=None):
+    """Refund a successful transaction (all of it unless amount_pesewas is given).
+
+    Returns Paystack's `data` (status is usually 'pending' or 'processed').
+    """
+    body = {"transaction": reference}
+    if amount_pesewas is not None:
+        body["amount"] = int(amount_pesewas)
+    if reason:
+        body["merchant_note"] = reason[:255]
+    try:
+        res = requests.post(f"{_base()}/refund", json=body, headers=_headers(), timeout=TIMEOUT_SECONDS)
+        payload = res.json()
+    except (requests.RequestException, ValueError) as e:
+        raise PaystackError(f"Could not reach Paystack: {e}")
+    if res.status_code >= 400 or not payload.get("status"):
+        raise PaystackError(payload.get("message") or f"Paystack error {res.status_code}")
+    return payload["data"]
+
+
 def valid_webhook_signature(raw_body: bytes, signature: str) -> bool:
     """Paystack signs webhooks with HMAC-SHA512 of the raw body using the secret key."""
     if not signature or not is_configured():

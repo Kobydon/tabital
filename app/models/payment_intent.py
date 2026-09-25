@@ -17,11 +17,18 @@ class PaymentIntent(db.Model):
     ABANDONED = 'abandoned'
     AMOUNT_MISMATCH = 'amount_mismatch'   # Paystack says paid, but not the amount we asked for
 
+    # purpose values
+    INSTALMENT = 'instalment'        # an instalment on an approved plan
+    DOWN_PAYMENT = 'down_payment'    # Payment 1, collected at checkout before approval
+
     id = db.Column(db.Integer, primary_key=True)
     reference = db.Column(db.String(64), unique=True, nullable=False, index=True)
     provider = db.Column(db.String(20), nullable=False, default='paystack')
-    plan_id = db.Column(db.Integer, db.ForeignKey('instalment_plans.id'), nullable=False, index=True)
-    payment_id = db.Column(db.Integer, db.ForeignKey('instalment_payments.id'), nullable=False, index=True)
+    purpose = db.Column(db.String(20), nullable=False, default=INSTALMENT)
+    # Instalment intents link to the plan/payment; down-payment intents link to the order
+    plan_id = db.Column(db.Integer, db.ForeignKey('instalment_plans.id'), nullable=True, index=True)
+    payment_id = db.Column(db.Integer, db.ForeignKey('instalment_payments.id'), nullable=True, index=True)
+    order_id = db.Column(db.Integer, db.ForeignKey('purchase_orders.id'), nullable=True, index=True)
     customer_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
     amount_pesewas = db.Column(db.BigInteger, nullable=False)
     currency = db.Column(db.String(3), nullable=False, default='GHS')
@@ -35,3 +42,4 @@ class PaymentIntent(db.Model):
 
     payment = db.relationship('InstalmentPayment', foreign_keys=[payment_id])
     plan = db.relationship('InstalmentPlan', foreign_keys=[plan_id])
+    order = db.relationship('PurchaseOrder', foreign_keys=[order_id])
