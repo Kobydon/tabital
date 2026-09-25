@@ -13,6 +13,12 @@ def safe_str(v): return v if v is not None else ""
 def safe_float(v): return v if v is not None else 0.0
 def safe_int(v): return v if v is not None else 0
 
+
+def _credit_summary(customer):
+    from ..services import risk
+    decision, _ = risk.decide(customer)
+    return risk.decision_view(decision)
+
 class CustomerDashboardStatsResource(Resource):
     @auth_required
     def get(self):
@@ -76,6 +82,8 @@ class CustomerDashboardStatsResource(Resource):
         
         return {
             "total_outstanding": safe_float(total_outstanding),
+            # Spending limit from underwriting (computed now, not stored)
+            "credit": _credit_summary(current_customer),
             "total_outstanding_plans_count": safe_int(total_outstanding_plans_count),
             "next_payment_amount": safe_float(next_payment_amount),
             "next_payment_date": next_payment_date,

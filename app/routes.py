@@ -145,7 +145,6 @@ from .resources.admin_customers import (
     AdminGetCustomersResource,
     AdminGetCustomerDetailResource,
     AdminUpdateCustomerStatusResource,
-    AdminUpdateCustomerCreditLimitResource,
     AdminAddCustomerNoteResource
 )
 
@@ -435,8 +434,25 @@ from .resources.paystack_payments import (
 )
 
 
+from .resources.underwriting import (
+    CustomerCreditResource,
+    CustomerUnderwritingDetailsResource,
+    AdminCustomerUnderwritingResource,
+    AdminRerunUnderwritingResource,
+    AdminCreditLimitOverrideResource
+)
+
+
 def register_routes(app):
     api = Api(app)
+
+    # ============================================
+    # UNDERWRITING (Phase 3)
+    # ============================================
+    api.add_resource(CustomerCreditResource, "/customer/credit")
+    api.add_resource(CustomerUnderwritingDetailsResource, "/customer/underwriting")
+    api.add_resource(AdminCustomerUnderwritingResource, "/admin/customers/<int:customer_id>/underwriting")
+    api.add_resource(AdminRerunUnderwritingResource, "/admin/customers/<int:customer_id>/underwriting/rerun")
 
     # ============================================
     # PAYSTACK (Phase 2)
@@ -802,7 +818,7 @@ def register_routes(app):
     api.add_resource(AdminGetCustomersResource, '/admin/customers')
     api.add_resource(AdminGetCustomerDetailResource, '/admin/customers/<int:customer_id>')
     api.add_resource(AdminUpdateCustomerStatusResource, '/admin/customers/<int:customer_id>/status')
-    api.add_resource(AdminUpdateCustomerCreditLimitResource, '/admin/customers/<int:customer_id>/credit-limit')
+    api.add_resource(AdminCreditLimitOverrideResource, '/admin/customers/<int:customer_id>/credit-limit')
     api.add_resource(AdminAddCustomerNoteResource, '/admin/customers/<int:customer_id>/note')
 
 

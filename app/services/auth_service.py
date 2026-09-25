@@ -25,6 +25,9 @@ MERCHANT_SIGNUP_FIELDS = {
     'business_phone', 'business_email', 'description', 'agree',
 }
 SIGNUP_FIELDS = {'customer': CUSTOMER_SIGNUP_FIELDS, 'merchant': MERCHANT_SIGNUP_FIELDS}
+# Validated and converted separately (see resources/underwriting.py)
+CUSTOMER_UNDERWRITING_FIELDS = ('national_id', 'monthly_salary', 'employment_start_date',
+                                'salary_paid_to_bank', 'momo_number')
 
 MIN_PASSWORD_LENGTH = 6
 OTP_TTL = timedelta(minutes=10)
@@ -56,6 +59,15 @@ def register_user(data):
     if fields.get('business_email'):
         fields['business_email'] = fields['business_email'].strip().lower()
 
+    if role == 'customer':
+        # Underwriting details (Phase 3); the salary is verified later by Tabital, never at sign-up
+        from ..resources.underwriting import FieldError, normalize_underwriting_fields
+        try:
+            fields.update(normalize_underwriting_fields(
+                {k: data[k] for k in CUSTOMER_UNDERWRITING_FIELDS if k in data}))
+        except FieldError as e:
+            raise RegistrationError(e.field, e.message)
+
     user = User(**fields)
     user.role = role
     user.status = 'pending'
@@ -70,6 +82,8 @@ def register_user(data):
         error_message = str(e.orig).lower() if e.orig else str(e).lower()
         if 'business_email' in error_message:
             raise RegistrationError('business_email', 'This email address is already registered. Please use a different email or login.', 409)
+        if 'momo_number' in error_message:
+            raise RegistrationError('momo_number', 'This Mobile Money number is already linked to another account.', 409)
         if 'phone' in error_message:
             raise RegistrationError('phone', 'This phone number is already registered. Please use a different number or login.', 409)
         raise RegistrationError('general', 'Registration failed. The information you provided may already be registered.', 409)

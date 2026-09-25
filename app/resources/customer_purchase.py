@@ -6,7 +6,7 @@ from ..models.product import Product
 from ..models.user import User
 from ..models.system_settings import SystemSetting
 from ..extensions import db
-from ..services import plan_engine, paystack
+from ..services import plan_engine, paystack, risk
 from datetime import datetime
 import json
 import uuid
@@ -22,7 +22,7 @@ class CustomerPurchaseResource(Resource):
         if current_customer.role != 'customer':
             return {"error": "Unauthorized"}, 403
         
-        # KYC is enforced here, not only in the UI
+        # KYC is enforced here, not only in the UI (and again by the eligibility rules)
         if current_customer.kyc_status != 'verified':
             return {"error": "Complete KYC verification before making a purchase"}, 403
 
@@ -50,10 +50,29 @@ class CustomerPurchaseResource(Resource):
         if not merchant or merchant.role != 'merchant' or merchant.status not in ('approved', 'active'):
             return {"error": "Merchant not available"}, 404
 
+        # Underwriting (§8, Phase 3): every purchase is decided and the decision is stored,
+        # including declines, so there's an audit trail.
+        from ..models.risk_assessment import RiskAssessment
+        decision, assessment = risk.evaluate(current_customer, RiskAssessment.PURCHASE)
+        if not decision.eligible:
+            db.session.commit()
+            return {"error": "You're not eligible for a payment plan right now",
+                    "reasons": decision.reasons}, 403
+
         try:
-            plan = plan_engine.quote(product.price, quantity, number_of_installments, SystemSetting.get_value)
+            plan = plan_engine.quote(product.price, quantity, number_of_installments, SystemSetting.get_value,
+                                     pay_in_4_dp_rate=decision.pay_in_4_dp_rate)
         except plan_engine.PlanError as e:
+            db.session.commit()
             return {"error": str(e)}, 400
+
+        # Spending limit: the purchase price must fit in the available limit
+        # (limit minus what's still owed). Full payment uses no credit.
+        if number_of_installments > 1 and plan["price"] > decision.available_limit:
+            db.session.commit()
+            return {"error": f"This purchase is above your available limit of GHS {decision.available_limit:,.2f}",
+                    "available_limit": float(decision.available_limit),
+                    "credit_limit": float(decision.credit_limit)}, 403
 
         order = PurchaseOrder(
             order_id=PurchaseOrder.generate_order_id(PurchaseOrder),
@@ -74,7 +93,8 @@ class CustomerPurchaseResource(Resource):
             # approval queue once it's paid. Without Paystack, it goes straight to approval
             # and the admin records the down payment reference (manual fallback).
             status='awaiting_payment' if paystack.is_configured() else 'pending',
-            delivery_address=delivery_address
+            delivery_address=delivery_address,
+            risk_assessment_id=assessment.id
         )
 
         db.session.add(order)

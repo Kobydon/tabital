@@ -64,6 +64,16 @@ class User(db.Model):
     branch_name = db.Column(db.String(100))
     account_number = db.Column(db.String(100),unique=True)
     
+    # Underwriting (Phase 3). national_id holds the Ghana Card number.
+    monthly_salary = db.Column(db.Numeric(12, 2))
+    employment_start_date = db.Column(db.Date)
+    salary_paid_to_bank = db.Column(db.Boolean, default=False)
+    salary_verified = db.Column(db.Boolean, default=False)      # set by admin against the salary certificate
+    risk_tier = db.Column(db.String(10))                         # latest decision: low / medium / high
+    credit_limit = db.Column(db.Numeric(12, 2))                  # latest decision
+    credit_limit_override = db.Column(db.Numeric(12, 2))         # admin override, with a reason on the assessment
+    limit_updated_at = db.Column(db.DateTime)
+
     # KYC Fields
     kyc_status = db.Column(db.String(50), default='pending')
     verification_level = db.Column(db.String(50), default='standard')

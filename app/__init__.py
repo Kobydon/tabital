@@ -7,6 +7,7 @@ from .extensions import db, ma, guard, mail
 from .models.user import User
 from .models import ledger as _ledger_model  # noqa: F401  (registers the ledger table)
 from .models import payment_intent as _payment_intent_model  # noqa: F401
+from .models import risk_assessment as _risk_assessment_model  # noqa: F401
 from .routes import register_routes
 
 

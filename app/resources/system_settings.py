@@ -111,15 +111,27 @@ class InstallmentCalculatorResource(Resource):
     def post(self):
         """Calculate installment plan"""
 
-        from ..services import plan_engine
+        from ..services import plan_engine, risk
 
+        current_user_obj = current_user()
         data = request.get_json() or {}
+
+        # A customer's quote uses their risk tier's Pay in 4 down payment, so the Shop
+        # shows exactly what /customer/purchase will charge
+        tier_dp_rate = None
+        credit = None
+        if current_user_obj.role == 'customer':
+            decision, _ = risk.decide(current_user_obj)
+            credit = risk.decision_view(decision)
+            if decision.eligible:
+                tier_dp_rate = decision.pay_in_4_dp_rate
 
         try:
             product_price = plan_engine.money(data.get('product_price', 0))
             quantity = int(data.get('quantity', 1))
             number_of_installments = int(data.get('number_of_installments', 1))
-            plan = plan_engine.quote(product_price, quantity, number_of_installments, SystemSetting.get_value)
+            plan = plan_engine.quote(product_price, quantity, number_of_installments, SystemSetting.get_value,
+                                     pay_in_4_dp_rate=tier_dp_rate)
         except (plan_engine.PlanError, ArithmeticError, TypeError, ValueError) as e:
             return {"error": str(e) or "Invalid plan request"}, 400
 
@@ -151,7 +163,9 @@ class InstallmentCalculatorResource(Resource):
                 "total_payable": f(plan["total_payable"]),
                 "merchant_payout": f(plan["merchant_settlement"])
             },
-            "payment_schedule": plan_engine.schedule_to_json(plan["schedule"])
+            "payment_schedule": plan_engine.schedule_to_json(plan["schedule"]),
+            # For customers: eligibility and available limit, so the Shop can warn before checkout
+            "credit": credit
         }, 200
 
 class LateFeeCalculatorResource(Resource):

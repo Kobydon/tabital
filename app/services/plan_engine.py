@@ -121,19 +121,25 @@ def build_plan(price, n_payments, dp_rate, service_fee="0", mdr="0.10",
     }
 
 
-def down_payment_rate_for(n_payments, settings_get):
-    """DPR per plan (§4, §13 #5). Rates are read from system settings, in percent."""
+def down_payment_rate_for(n_payments, settings_get, pay_in_4_dp_rate=None):
+    """DPR per plan (§4, §13 #5). Rates are read from system settings, in percent.
+
+    pay_in_4_dp_rate is the customer's risk-tier rate for Pay in 4 (§8.2, set in the risk
+    rules). When given it applies; otherwise the configured default does.
+    """
     if n_payments not in SUPPORTED_PLANS:
         raise PlanError(f"Only {', '.join(map(str, SUPPORTED_PLANS))}-payment plans are available")
     if n_payments == 1:
         return Decimal("1")
     if n_payments == 4:
+        if pay_in_4_dp_rate is not None:
+            return rate(pay_in_4_dp_rate)
         return rate(settings_get("down_payment_percentage", 40)) / 100
     return rate(settings_get("down_payment_percentage_short_plans", 50)) / 100
 
 
-def quote(price, quantity, n_payments, settings_get, start=None):
-    """Build a plan using the current system settings.
+def quote(price, quantity, n_payments, settings_get, start=None, pay_in_4_dp_rate=None):
+    """Build a plan using the current system settings (and the customer's tier, if given).
 
     settings_get(key, default) is normally SystemSetting.get_value.
     """
@@ -143,7 +149,7 @@ def quote(price, quantity, n_payments, settings_get, start=None):
     return build_plan(
         price=money(price) * quantity,
         n_payments=n_payments,
-        dp_rate=down_payment_rate_for(n_payments, settings_get),
+        dp_rate=down_payment_rate_for(n_payments, settings_get, pay_in_4_dp_rate),
         service_fee=settings_get("service_fee", 0),
         mdr=rate(settings_get("merchant_fee_percentage", 10)) / 100,
         delivery_fee=settings_get("delivery_fee", 50),

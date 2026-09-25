@@ -45,6 +45,8 @@ class PurchaseOrder(db.Model):
     # Set when a paid order is rejected: refunded, refund_failed
     refund_status = db.Column(db.String(30))
     refund_reference = db.Column(db.String(100))
+    # The underwriting decision this order was accepted under
+    risk_assessment_id = db.Column(db.Integer, db.ForeignKey('risk_assessments.id'), nullable=True)
     
     # Delivery
     delivery_address = db.Column(db.String(500))

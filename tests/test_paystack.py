@@ -18,6 +18,7 @@ from app.models.payment_intent import PaymentIntent
 from app.models.product import Product
 from app.models.purchase_order import PurchaseOrder
 from app.models.user import User
+from tests.helpers import eligible_customer
 from app.services import ledger, paystack
 
 FAKE_SECRET = "sk_test_fake_key_for_unit_tests"
@@ -52,7 +53,7 @@ class FakePaystack:
 
 def make_user(role, phone, **extra):
     user = User(phone=phone, role=role, status="approved",
-                password=guard.hash_password("Secret123!"), **extra)
+                password=guard.hash_password("Secret123!"), **eligible_customer(extra, phone))
     db.session.add(user)
     db.session.commit()
     return user

@@ -148,24 +148,9 @@ class AdminGetCustomersResource(Resource):
                 status='active'
             ).count()
             
-            # Determine risk level based on customer data
-            risk_level = "Low"
-            if outstanding > 1000 or active_plans > 2:
-                risk_level = "Medium"
-            if outstanding > 2000 or customer.kyc_status == 'rejected':
-                risk_level = "High"
-            
-            # Determine credit limit based on income range
-            credit_limit = 500
-            if customer.income_range:
-                if "5,000+" in customer.income_range:
-                    credit_limit = 5000
-                elif "3,000" in customer.income_range:
-                    credit_limit = 3000
-                elif "1,000" in customer.income_range:
-                    credit_limit = 2000
-                else:
-                    credit_limit = 1000
+            # Tier and limit come from the latest stored underwriting decision (Phase 3)
+            risk_level = (customer.risk_tier or 'not assessed').title()
+            credit_limit = float(customer.credit_limit) if customer.credit_limit is not None else 0.0
             
             customers.append({
                 "id": customer.id,
@@ -357,7 +342,9 @@ class AdminGetCustomerDetailResource(Resource):
                 "created_at": customer.created_at.isoformat() if customer.created_at else None
             },
             "financial": {
-                "credit_limit": 2000,  # Could be dynamic based on customer
+                "credit_limit": float(customer.credit_limit) if customer.credit_limit is not None else 0.0,
+                "risk_tier": customer.risk_tier,
+                "limit_updated_at": customer.limit_updated_at.isoformat() if customer.limit_updated_at else None,
                 "outstanding": float(outstanding),
                 "total_paid": float(total_paid),
                 "total_financed": float(total_financed),
@@ -406,37 +393,6 @@ class AdminUpdateCustomerStatusResource(Resource):
             "message": f"Customer status updated to {new_status}",
             "customer_id": customer.id,
             "status": new_status
-        }, 200
-
-
-class AdminUpdateCustomerCreditLimitResource(Resource):
-    @auth_required
-    def put(self, customer_id):
-        """Update customer credit limit"""
-        current_admin = current_user()
-        
-        if current_admin.role != 'admin':
-            return {"error": "Unauthorized"}, 403
-        
-        data = request.get_json()
-        new_limit = data.get('credit_limit')
-        
-        if not new_limit or new_limit < 0:
-            return {"error": "Invalid credit limit"}, 400
-        
-        customer = User.query.filter_by(id=customer_id, role='customer').first()
-        if not customer:
-            return {"error": "Customer not found"}, 404
-        
-        # You can store credit_limit in User model or a separate table
-        # For now, we'll just return success
-        
-        db.session.commit()
-        
-        return {
-            "message": f"Credit limit updated to GHS {new_limit}",
-            "customer_id": customer.id,
-            "credit_limit": new_limit
         }, 200
 
 
