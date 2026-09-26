@@ -75,6 +75,11 @@ def _details(user):
         "momo_number": user.momo_number,
         "company": user.company,
         "kyc_status": user.kyc_status,
+        "verification_level": user.verification_level,
+        # Employment verification (Phase 6, §9B)
+        "employment_verified_at": user.employment_verified_at.isoformat() if user.employment_verified_at else None,
+        "employment_verification_method": user.employment_verification_method,
+        "employment_verification_note": user.employment_verification_note,
         "credit_limit_override": float(user.credit_limit_override) if user.credit_limit_override is not None else None,
     }
 
