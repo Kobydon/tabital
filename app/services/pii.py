@@ -50,15 +50,25 @@ def mask_generic(value: str, keep: int = 4) -> str:
     return MASK_CHAR * 6 + s[-keep:]
 
 
+def _norm(key) -> str:
+    """Match keys however they're written: national_id, IDNumber, PhoneNumber (Smile ID), ..."""
+    return re.sub(r"[^a-z0-9]", "", str(key).lower())
+
+
+_CARD = {_norm(k) for k in CARD_KEYS}
+_PHONE = {_norm(k) for k in PHONE_KEYS}
+_ACCOUNT = {_norm(k) for k in ACCOUNT_KEYS}
+
+
 def mask_value(key: str, value):
     if not isinstance(value, str) or not value.strip() or is_masked(value):
         return value
-    k = key.lower()
-    if k in CARD_KEYS:
+    k = _norm(key)
+    if k in _CARD:
         return mask_card(value)
-    if k in PHONE_KEYS:
+    if k in _PHONE or k.startswith("phonenumber"):
         return mask_phone(value)
-    if k in ACCOUNT_KEYS:
+    if k in _ACCOUNT:
         return mask_generic(value, keep=4)
     return value
 

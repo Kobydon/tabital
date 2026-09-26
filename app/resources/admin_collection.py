@@ -274,8 +274,9 @@ class AdminSendPaymentReminderResource(Resource):
 
         data = request.get_json() or {}
         channel = data.get('reminder_type', 'sms')
-        if channel not in ('sms', 'whatsapp', 'in_app'):
-            return {"error": "reminder_type must be sms, whatsapp or in_app"}, 400
+        # WhatsApp isn't connected yet (it would silently go out as SMS)
+        if channel not in ('sms', 'in_app'):
+            return {"error": "reminder_type must be sms or in_app"}, 400
 
         payment = InstalmentPayment.query.get(payment_id)
         if not payment:
@@ -355,38 +356,16 @@ class AdminMarkPaymentReceivedResource(Resource):
 
 
 class AdminSetPaymentPlanResource(Resource):
+    """Turned off. It moved an overdue instalment's due date with no fee, record or ledger entry,
+    which hides delinquency (CLAUDE.md §8.4, §12). Customers can defer one instalment for the 10%
+    fee (deferments.py). An admin hardship arrangement needs a founder policy first."""
+
     @auth_required
     def post(self, payment_id):
-        """Set up a payment plan for overdue payment"""
-        current_admin = current_user()
-        
-        if current_admin.role != 'admin':
+        if current_user().role != 'admin':
             return {"error": "Unauthorized"}, 403
-        
-        data = request.get_json()
-        plan_type = data.get('plan_type', 'installments')  # installments, extension, partial
-        new_due_date = data.get('new_due_date')
-        notes = data.get('notes', '')
-        
-        payment = InstalmentPayment.query.get(payment_id)
-        if not payment:
-            return {"error": "Payment not found"}, 404
-        
-        # Update payment with new arrangement
-        if new_due_date:
-            payment.due_date = datetime.fromisoformat(new_due_date)
-        
-        # Store arrangement details (you might want to create a PaymentArrangement model)
-        
-        db.session.commit()
-        
-        return {
-            "message": f"Payment plan arranged: {plan_type}",
-            "payment_id": payment.payment_id,
-            "new_due_date": new_due_date,
-            "plan_type": plan_type
-        }, 200
-
+        return {"error": "Changing a due date from Collections is turned off. The customer can defer one "
+                         "instalment (10% fee) from their app; other arrangements need a founder-approved policy."}, 410
 
 class AdminExportOverduePaymentsResource(Resource):
     @auth_required

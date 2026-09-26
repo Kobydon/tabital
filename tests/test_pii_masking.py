@@ -12,6 +12,8 @@ def test_mask_formats():
     assert pii.mask_value("national_id", "GHA-123456789-0") == f"GHA-{M * 5}6789-0"
     assert pii.mask_value("customer_phone", "0241234567") == f"024{M * 5}67"
     assert pii.mask_value("account_number", "1234567890") == f"{M * 6}7890"
+    assert pii.mask_value("IDNumber", "GHA-123456789-0") == f"GHA-{M * 5}6789-0"   # Smile ID's own keys
+    assert pii.mask_value("PhoneNumber2", "0241234567") == f"024{M * 5}67"
     assert pii.mask_value("full_name", "Ama Mensah") == "Ama Mensah"          # not an identifier
     nested = pii.mask_payload({"orders": [{"customer_phone": "0241234567", "total": 4050}]})
     assert nested["orders"][0]["customer_phone"].endswith("67") and nested["orders"][0]["total"] == 4050

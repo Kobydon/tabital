@@ -26,10 +26,22 @@ class AdminGetOrdersResource(Resource):
         limit = request.args.get('limit', 20, type=int)
         
         query = PurchaseOrder.query
-        
+        search = (request.args.get('search') or '').strip()
+        if search:
+            like = f"%{search}%"
+            user_ids = db.session.query(User.id).filter(db.or_(
+                User.full_name.ilike(like), User.business_name.ilike(like), User.phone.ilike(like)))
+            query = query.filter(db.or_(
+                PurchaseOrder.order_id.ilike(like), PurchaseOrder.product_name.ilike(like),
+                PurchaseOrder.customer_id.in_(user_ids), PurchaseOrder.merchant_id.in_(user_ids)))
+
+        # Counts for the whole queue (not just this page), so the tabs show real numbers
+        counts = dict(query.with_entities(PurchaseOrder.status, db.func.count(PurchaseOrder.id))
+                      .group_by(PurchaseOrder.status).all())
+
         if status:
             query = query.filter(PurchaseOrder.status == status)
-        
+
         total = query.count()
         orders = query.order_by(PurchaseOrder.created_at.desc()).offset((page - 1) * limit).limit(limit).all()
         
@@ -39,6 +51,7 @@ class AdminGetOrdersResource(Resource):
                 "order_id": o.order_id,
                 "customer_name": safe_str(o.customer.full_name or o.customer.business_name),
                 "customer_phone": safe_str(o.customer.phone),
+                "customer_user_id": o.customer.id if o.customer else None,
                 "merchant_name": safe_str(o.merchant.business_name or o.merchant.full_name),
                 "product_name": o.product_name,
                 "product_price": o.product_price,
@@ -60,6 +73,7 @@ class AdminGetOrdersResource(Resource):
                 "employment_verified": bool(o.customer and o.customer.employment_verified_at),
             } for o in orders],
             "total": total,
+            "counts": counts,
             "page": page,
             "limit": limit,
             "total_pages": (total + limit - 1) // limit
