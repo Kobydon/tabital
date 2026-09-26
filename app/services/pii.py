@@ -14,7 +14,7 @@ MASK_CHAR = "•"   # •
 # Response keys that hold personal identifiers
 CARD_KEYS = {"national_id", "id_number", "ghana_card", "ghana_card_number"}
 PHONE_KEYS = {"phone", "customer_phone", "merchant_phone", "business_phone", "momo_number", "ref_phone",
-              "phone_number", "user_phone", "mobile_money_number"}
+              "phone_number", "user_phone", "mobile_money_number", "to_address"}
 ACCOUNT_KEYS = {"account_number", "bank_account", "bank_account_number"}
 
 # What an admin may reveal, per user field

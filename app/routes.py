@@ -507,6 +507,9 @@ def register_routes(app):
     api.add_resource(CustomerPlanOptionsResource, "/customer/plan-options")
 
     # Masked personal data on admin screens: reveal one value with a reason (logged)
+    from .resources.admin_team import AdminTeamResource, AdminTeamMemberResource
+    api.add_resource(AdminTeamResource, "/admin/team")
+    api.add_resource(AdminTeamMemberResource, "/admin/team/<int:admin_id>")
     api.add_resource(AdminPiiRevealResource, "/admin/pii/reveal")
     api.add_resource(AdminPiiAccessLogResource, "/admin/pii/access-log")
 

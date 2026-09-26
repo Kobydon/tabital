@@ -458,6 +458,7 @@ class GetCurrentUserResource(Resource):
 
             "phone": safe_str(user.phone),
             "role": safe_str(user.role),
+            "admin_level": (user.admin_level or 'operations') if user.role == 'admin' else None,
             "status": safe_str(user.status),
 
             "business_name": safe_str(user.business_name),

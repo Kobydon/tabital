@@ -45,6 +45,7 @@ def create_app():
     register_routes(app)
     register_commands(app)
     register_pii_masking(app)
+    register_access_control(app)
 
     return app
 
@@ -73,22 +74,61 @@ def register_pii_masking(app):
         return response
 
 
+def register_access_control(app):
+    """Management Access (services/access.py): checked once for every request an admin makes."""
+    from flask import request
+    from .services import access
+
+    @app.before_request
+    def _management_access():
+        if request.method == "OPTIONS" or "Authorization" not in request.headers:
+            return None
+        try:
+            data = guard.extract_jwt_token(guard.read_token_from_header())
+            user = User.query.get(data.get("id"))
+        except Exception:        # bad or expired token: the endpoint's own auth check answers
+            return None
+        if not user or user.role != "admin" or access.is_management(user):
+            return None
+        if access.needs_management(request.method, request.path):
+            return {"error": access.MESSAGE, "code": "management_required"}, 403
+        return None
+
+
 def register_commands(app):
     import click
 
     @app.cli.command("create-admin")
     @click.option("--phone", required=True, help="Admin login phone number")
     @click.option("--name", default="Tabital Admin")
+    @click.option("--management", is_flag=True, help="Give Management Access (approvals, rates, reveals)")
     @click.password_option()
-    def create_admin(phone, name, password):
-        """Create an admin account. Admins can't be created through the public API."""
+    def create_admin(phone, name, management, password):
+        """Create an admin account. Admins can't be created through the public API.
+
+        New admins get operations (read-only) access unless --management is given.
+        """
+        from .services import access
         if User.query.filter_by(phone=phone).first():
             raise click.ClickException("A user with that phone number already exists")
-        admin = User(phone=phone, full_name=name, role="admin", status="approved",
+        level = access.MANAGEMENT if management else access.OPERATIONS
+        admin = User(phone=phone, full_name=name, role="admin", status="approved", admin_level=level,
                      password=guard.hash_password(password))
         db.session.add(admin)
         db.session.commit()
-        click.echo(f"Admin {phone} created")
+        click.echo(f"Admin {phone} created with {level} access")
+
+    @app.cli.command("set-admin-access")
+    @click.option("--phone", required=True)
+    @click.option("--level", required=True, type=click.Choice(["management", "operations"]))
+    def set_admin_access(phone, level):
+        """Change an admin's access from the server (e.g. to set up the first manager)."""
+        admin = User.query.filter_by(phone=phone, role="admin").first()
+        if not admin:
+            raise click.ClickException("No admin with that phone number")
+        admin.admin_level = level
+        db.session.commit()
+        click.echo(f"{phone} now has {level} access")
 
     @app.cli.command("run-daily")
     @click.option("--date", "run_date", default=None, help="Service as of this date (YYYY-MM-DD); default today")

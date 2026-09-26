@@ -30,6 +30,8 @@ def app_ctx():
 
 
 def make_user(role, phone, **extra):
+    if role == "admin":
+        extra.setdefault("admin_level", "management")   # services/access.py
     user = User(phone=phone, role=role, status="approved",
                 password=guard.hash_password("Secret123!"), **eligible_customer(extra, phone))
     db.session.add(user)
