@@ -9,7 +9,8 @@ from sqlalchemy.exc import IntegrityError
 from ..extensions import db
 from ..models.risk_assessment import RiskAssessment
 from ..models.user import User
-from ..services import risk
+from ..services import fraud, risk
+from ..services.fraud import normalise_ghana_card
 
 
 class FieldError(ValueError):
@@ -23,10 +24,11 @@ def normalize_underwriting_fields(data, allow_verification=False):
     """Validate and convert underwriting fields from a request. Only keys present are returned."""
     out = {}
     if 'national_id' in data:
-        value = (data.get('national_id') or '').strip().upper()
-        if value and len(value) < 8:
-            raise FieldError('national_id', 'Enter the full Ghana Card number')
-        out['national_id'] = value or None
+        raw = (data.get('national_id') or '').strip()
+        value = normalise_ghana_card(raw) if raw else None
+        if raw and not value:
+            raise FieldError('national_id', 'Enter the Ghana Card number as GHA-XXXXXXXXX-X')
+        out['national_id'] = value
     if 'monthly_salary' in data:
         raw = data.get('monthly_salary')
         if raw in (None, ''):
@@ -115,6 +117,12 @@ class CustomerUnderwritingDetailsResource(Resource):
         except FieldError as e:
             return {"error": e.message, "field": e.field}, 400
 
+        # The Ghana Card is what identity was verified against (Phase 6)
+        if customer.kyc_status == 'verified' and 'national_id' in fields \
+                and fields['national_id'] != normalise_ghana_card(customer.national_id):
+            return {"error": "Your Ghana Card is already verified. Contact support to change it.",
+                    "field": "national_id"}, 409
+
         changes_income = any(
             k in fields and fields[k] != getattr(customer, k)
             for k in ('monthly_salary', 'employment_start_date', 'salary_paid_to_bank'))
@@ -124,6 +132,8 @@ class CustomerUnderwritingDetailsResource(Resource):
             return {"error": e.message, "field": e.field}, 409
         if changes_income:
             customer.salary_verified = False
+        if 'national_id' in fields or 'momo_number' in fields:
+            fraud.check_duplicates(customer)       # same Ghana Card / MoMo on another account (§9D)
         db.session.commit()
 
         decision, _ = risk.decide(customer)

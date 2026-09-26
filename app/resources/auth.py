@@ -22,7 +22,23 @@ class LoginResource(Resource):
             token = login_user(data.get("phone"), data.get("password"))
         except AuthError as e:
             return {"error": e.message, "message": e.message}, e.status
+        _record_login_device(data.get("phone"))
         return {"access_token": token}, 200
+
+
+def _record_login_device(phone):
+    """Device checks (§9D). Never stops a login: a failure here is only logged."""
+    from flask import current_app
+    from ..extensions import db
+    from ..services import fraud
+    try:
+        user = User.query.filter_by(phone=(phone or '').strip()).first()
+        if user:
+            fraud.record_device(user)
+            db.session.commit()
+    except Exception:                      # noqa: BLE001
+        db.session.rollback()
+        current_app.logger.exception("Device check failed at login")
 
 
 class CheckUserExistsResource(Resource):

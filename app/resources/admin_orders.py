@@ -5,6 +5,7 @@ from ..models.purchase_order import PurchaseOrder
 from ..models.user import User
 from ..models.transaction import Transaction
 from ..extensions import db
+from ..services import fraud
 from datetime import datetime
 import json
 
@@ -52,7 +53,11 @@ class AdminGetOrdersResource(Resource):
                 "down_payment_paid_at": o.down_payment_paid_at.isoformat() if o.down_payment_paid_at else None,
                 "refund_status": o.refund_status,
                 "created_at": o.created_at.isoformat() if o.created_at else "",
-                "delivery_address": o.delivery_address
+                "delivery_address": o.delivery_address,
+                # Phase 6: open fraud flags on the customer or merchant, and identity/employment checks
+                "fraud_flags": fraud.review_flags(o.customer, o.merchant) if o.customer else [],
+                "identity_verified_by": o.customer.verification_level if o.customer else None,
+                "employment_verified": bool(o.customer and o.customer.employment_verified_at),
             } for o in orders],
             "total": total,
             "page": page,

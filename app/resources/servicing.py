@@ -157,6 +157,8 @@ class CustomerDisputesResource(Resource):
         db.session.add(d)
         plan.paused_at = datetime.utcnow()
         plan.paused_reason = f"Dispute {d.dispute_id}: {reason}"
+        from ..services import fraud
+        fraud.check_quick_dispute(plan, d)       # a dispute right after delivery may be a fake sale (§9E)
         db.session.commit()
         return {"message": "We've paused your remaining payments while we look into this.",
                 "dispute": _dispute_view(d, plan)}, 201

@@ -45,8 +45,14 @@ class CustomerUpdateProfileResource(Resource):
         if current_customer.role != "customer":
             return {"error": "Unauthorized"}, 403
         
-        data = request.get_json()
-        
+        data = request.get_json() or {}
+
+        # The verified name is the one on the Ghana Card (Phase 6): it can't be edited afterwards
+        if current_customer.kyc_status == 'verified' and 'full_name' in data \
+                and (data['full_name'] or '').strip() != (current_customer.full_name or '').strip():
+            return {"error": "Your name is verified against your Ghana Card. Contact support to change it.",
+                    "field": "full_name"}, 409
+
         # income_range feeds underwriting, so it can only change through re-verification
         allowed_fields = ['full_name', 'business_name', 'email', 'city', 'address', 'gps']
         

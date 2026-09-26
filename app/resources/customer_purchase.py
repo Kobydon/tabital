@@ -63,6 +63,31 @@ class CustomerPurchaseResource(Resource):
         if not merchant or merchant.role != 'merchant' or merchant.status not in ('approved', 'active'):
             return {"error": "Merchant not available"}, 404
 
+        # Fraud checks (§9D/E, Phase 6): device, duplicate accounts, customer-merchant links
+        from ..services import fraud
+        fraud.record_device(current_customer)
+        fraud.check_duplicates(current_customer)
+        stop = fraud.check_purchase(current_customer, merchant)
+        if stop:
+            db.session.commit()      # keep the signals
+            return {"error": stop}, 403
+
+        # Employment verification (§9B, Phase 6): needed for a first credit purchase and for
+        # high-ticket orders (§13.1 D6)
+        if number_of_installments > 1 and not current_customer.employment_verified_at:
+            from ..models.instalment import InstalmentPlan
+            first_time = InstalmentPlan.query.filter_by(customer_id=current_customer.id).count() == 0
+            high_ticket = float(product.price) * quantity >= float(SystemSetting.get_value("high_ticket_threshold", 10000))
+            if first_time or high_ticket:
+                db.session.commit()
+                return {"error": "We need to verify your employment before this purchase",
+                        "reasons": ["Tabital confirms employment with your employer for first purchases"
+                                    if first_time else
+                                    "Tabital confirms employment for orders of GHS "
+                                    f"{float(SystemSetting.get_value('high_ticket_threshold', 10000)):,.0f} or more",
+                                    "Upload your staff ID or employment letter under Documents; our team will contact your employer"],
+                        "code": "employment_verification_required"}, 403
+
         # Underwriting (§8, Phase 3): every purchase is decided and the decision is stored,
         # including declines, so there's an audit trail.
         from ..models.risk_assessment import RiskAssessment

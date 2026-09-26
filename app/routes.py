@@ -468,10 +468,34 @@ from .resources.merchant_payouts import (
     MerchantPaymentLinkResource,
     CustomerPaymentLinkResource
 )
+from .resources.identity_fraud import (
+    CustomerIdentityResource,
+    CustomerIdentityStartResource,
+    CustomerIdentitySubmittedResource,
+    SmileIDWebhookResource,
+    AdminIdentityChecksResource,
+    AdminIdentityDecideResource,
+    AdminEmploymentVerificationResource,
+    AdminFraudSignalsResource,
+    AdminFraudSignalResource
+)
 
 
 def register_routes(app):
     api = Api(app)
+
+    # ============================================
+    # IDENTITY (Smile ID) AND FRAUD CHECKS (Phase 6)
+    # ============================================
+    api.add_resource(CustomerIdentityResource, "/customer/identity")
+    api.add_resource(CustomerIdentityStartResource, "/customer/identity/start")
+    api.add_resource(CustomerIdentitySubmittedResource, "/customer/identity/<int:check_id>/submitted")
+    api.add_resource(SmileIDWebhookResource, "/webhooks/smileid")
+    api.add_resource(AdminIdentityChecksResource, "/admin/identity-checks")
+    api.add_resource(AdminIdentityDecideResource, "/admin/identity-checks/<int:check_id>/decide")
+    api.add_resource(AdminEmploymentVerificationResource, "/admin/customers/<int:customer_id>/employment-verification")
+    api.add_resource(AdminFraudSignalsResource, "/admin/fraud-signals")
+    api.add_resource(AdminFraudSignalResource, "/admin/fraud-signals/<int:signal_id>")
 
     # ============================================
     # MERCHANT SETTLEMENTS, PAYOUTS, PAYMENT LINKS (Phase 5)

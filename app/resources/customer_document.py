@@ -485,6 +485,19 @@ class AdminGetCustomerKYCDetailResource(Resource):
         }, 200
 
 
+def _manual_kyc_blocked(customer):
+    """Why an admin can't mark this customer verified from documents, or None."""
+    from ..services import fraud, identity
+    fraud.check_duplicates(customer)
+    if fraud.blocking_signals(customer):
+        db.session.commit()      # keep the signal
+        return "This customer has an open fraud flag (e.g. a duplicate Ghana Card). Resolve it in Fraud review first."
+    if identity.biometric_required():
+        return ("Identity is verified with the Smile ID selfie check now. Ask the customer to complete it, "
+                "or decide their check in Identity review.")
+    return None
+
+
 class AdminApproveCustomerKYCResource(Resource):
     @auth_required
     def put(self, customer_id):
@@ -497,14 +510,22 @@ class AdminApproveCustomerKYCResource(Resource):
         customer = User.query.get(customer_id)
         if not customer or customer.role != 'customer':
             return {"error": "Customer not found"}, 404
-        
+
+        # Phase 6: once Smile ID is on, identity is only verified by the selfie + Ghana Card check
+        # (or an admin decision on that check in the identity review queue), never by documents alone
+        blocked = _manual_kyc_blocked(customer)
+        if blocked:
+            return {"error": blocked}, 409
+
         try:
             documents = Document.query.filter_by(user_id=customer.id).all()
             for doc in documents:
                 doc.status = 'verified'
                 doc.verified_by = current_admin.id
                 doc.verified_at = datetime.now()
-            
+
+            from ..services import identity
+            identity.record_manual(customer, current_admin, True, (request.get_json(silent=True) or {}).get('note'))
             customer.kyc_status = 'verified'
             customer.verification_level = 'verified'
             customer.kyc_completed_on = datetime.now()
@@ -596,7 +617,11 @@ class AdminApproveCustomerDocumentResource(Resource):
             
             if all_verified:
                 customer = User.query.get(document.user_id)
+                if customer and customer.role == 'customer' and _manual_kyc_blocked(customer):
+                    customer = None      # documents are checked, but identity still needs Smile ID
                 if customer:
+                    from ..services import identity
+                    identity.record_manual(customer, current_admin, True, "All documents approved")
                     customer.kyc_status = 'verified'
                     customer.verification_level = 'verified'
                     customer.kyc_completed_on = datetime.now()

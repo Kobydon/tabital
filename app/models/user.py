@@ -82,6 +82,12 @@ class User(db.Model):
     payout_details_updated_at = db.Column(db.DateTime)
     payout_hold_until = db.Column(db.DateTime)                    # payouts paused after a details change
 
+    # Employment verification (Phase 6, §9B): needed for a first purchase and high-ticket orders
+    employment_verified_at = db.Column(db.DateTime)
+    employment_verified_by = db.Column(db.Integer)                # admin user id
+    employment_verification_method = db.Column(db.String(30))     # employer_call / employer_letter / payslip / ssnit
+    employment_verification_note = db.Column(db.String(500))
+
     # KYC Fields
     kyc_status = db.Column(db.String(50), default='pending')
     verification_level = db.Column(db.String(50), default='standard')

@@ -76,6 +76,7 @@ def register_user(data):
     try:
         db.session.add(user)
         db.session.commit()
+        _signup_fraud_checks(user)
         return user
     except IntegrityError as e:
         db.session.rollback()
@@ -94,6 +95,18 @@ class AuthError(Exception):
         super().__init__(message)
         self.message = message
         self.status = status
+
+
+def _signup_fraud_checks(user):
+    """Duplicate Ghana Card / MoMo and device checks (§9D). They flag for review, never block sign-up."""
+    from . import fraud
+    try:
+        fraud.record_device(user)
+        fraud.check_duplicates(user)
+        db.session.commit()
+    except Exception:                      # noqa: BLE001
+        db.session.rollback()
+        current_app.logger.exception("Fraud checks failed at sign-up")
 
 
 def login_user(identifier, password):

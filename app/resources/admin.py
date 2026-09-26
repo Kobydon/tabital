@@ -550,6 +550,12 @@ class AdminApproveOrderResource(Resource):
         if order.status != 'pending':
             return {"error": f"Order already {order.status}"}, 400
 
+        # Phase 6: an open block-level fraud flag on either side stops approval until it's reviewed
+        from ..services import fraud
+        for party in (order.customer, order.merchant):
+            if party and fraud.blocking_signals(party):
+                return {"error": f"Resolve the fraud flag on this {party.role} in Fraud review before approving"}, 409
+
         data = request.get_json() or {}
 
         # Order status is committed together with the plan, payments and transaction below

@@ -148,6 +148,10 @@ def hold_reason(merchant, now=None):
         return "Merchant account isn't active"
     if merchant.payout_hold_until and merchant.payout_hold_until > now:
         return f"Payout details changed; on hold until {merchant.payout_hold_until:%d %b %Y %H:%M} UTC"
+    from . import fraud
+    flagged = fraud.merchant_hold_reason(merchant)
+    if flagged:
+        return flagged
     account, reason = payout_account(merchant)
     if not account:
         return reason
