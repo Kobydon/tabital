@@ -14,6 +14,7 @@ from .models import settlement as _settlement_model  # noqa: F401
 from .models import identity as _identity_model  # noqa: F401
 from .models import deferment as _deferment_model  # noqa: F401
 from .models import pii_access as _pii_access_model  # noqa: F401
+from .models import login_attempt as _login_attempt_model  # noqa: F401
 from .routes import register_routes
 
 

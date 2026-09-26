@@ -1,5 +1,5 @@
 """Underwriting wired into the app: purchases, KYC approval, admin tools, customer views."""
-from datetime import date, timedelta
+from datetime import datetime, date, timedelta
 from decimal import Decimal
 
 import pytest
@@ -74,7 +74,7 @@ def high_tier_below_12_months():
 def test_high_tier_pays_50_percent_down_on_pay_in_4(env):
     high_tier_below_12_months()
     c = make_user("customer", "0200000411", kyc_status="verified",
-                  employment_start_date=date.today() - timedelta(days=240))   # ~8 months
+                  employment_start_date=datetime.utcnow().date() - timedelta(days=240))   # ~8 months
     res = buy(env, c)
     assert res.status_code == 201, res.get_json()
     order = PurchaseOrder.query.one()
@@ -165,7 +165,7 @@ def test_admin_underwriting_view_shows_history(env):
 def test_quote_and_dashboard_show_customer_terms(env):
     high_tier_below_12_months()
     c = make_user("customer", "0200000419", kyc_status="verified",
-                  employment_start_date=date.today() - timedelta(days=240))
+                  employment_start_date=datetime.utcnow().date() - timedelta(days=240))
     headers = token(env["client"], c.phone)
     quote = env["client"].post("/installment/calculate", headers=headers,
                                json={"product_price": 4000, "number_of_installments": 4}).get_json()

@@ -368,5 +368,5 @@ def test_fraud_hold_stops_merchant_payouts(env):
     db.session.add(SettlementLine(merchant_id=m.id, plan_id=plan.id, line_type="sale", gross_pesewas=400000,
                                   fee_pesewas=40000, net_pesewas=360000, description="t"))
     db.session.commit()
-    batch = settlements.generate_batches(date.today() + timedelta(days=8))[0]
+    batch = settlements.generate_batches(datetime.utcnow().date() + timedelta(days=8))[0]
     assert batch.status == Settlement.ON_HOLD and "Fraud" in batch.hold_reason

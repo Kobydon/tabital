@@ -89,8 +89,8 @@ def test_delivery_makes_the_sale_payable_once(env):
 
 def test_no_batch_before_the_cycle_ends(env):
     deliver(env)
-    assert settlements.generate_batches(date.today() + timedelta(days=6)) == []
-    batches = settlements.generate_batches(date.today() + timedelta(days=7))
+    assert settlements.generate_batches(datetime.utcnow().date() + timedelta(days=6)) == []
+    batches = settlements.generate_batches(datetime.utcnow().date() + timedelta(days=7))
     assert len(batches) == 1
     b = batches[0]
     assert b.status == Settlement.PENDING_APPROVAL and b.net_pesewas == 360000
@@ -101,13 +101,13 @@ def test_merchant_chooses_3_7_or_30_day_cycle(env):
     assert env["client"].put("/merchant/payout-account", headers=h, json={"settlement_period_days": 14}).status_code == 400
     assert env["client"].put("/merchant/payout-account", headers=h, json={"settlement_period_days": 3}).status_code == 200
     deliver(env)
-    assert len(settlements.generate_batches(date.today() + timedelta(days=3))) == 1
+    assert len(settlements.generate_batches(datetime.utcnow().date() + timedelta(days=3))) == 1
 
 
 def test_approval_pays_through_paystack_and_settles_the_ledger(env):
     pay_config(env)
     deliver(env)
-    batch = settlements.generate_batches(date.today() + timedelta(days=7))[0]
+    batch = settlements.generate_batches(datetime.utcnow().date() + timedelta(days=7))[0]
     res = env["client"].post(f"/admin/settlement-batches/{batch.id}/approve", headers=env["admin"])
     assert res.status_code == 200 and res.get_json()["outcome"] == "paid"
     fake = env["fake"]
@@ -122,7 +122,7 @@ def test_pending_transfer_is_finished_by_signed_webhook(env):
     pay_config(env)
     env["fake"].transfer_status = "pending"
     deliver(env)
-    batch = settlements.generate_batches(date.today() + timedelta(days=7))[0]
+    batch = settlements.generate_batches(datetime.utcnow().date() + timedelta(days=7))[0]
     env["client"].post(f"/admin/settlement-batches/{batch.id}/approve", headers=env["admin"])
     db.session.refresh(batch)
     assert batch.status == Settlement.PROCESSING
@@ -143,7 +143,7 @@ def test_failed_transfer_can_be_retried(env):
     paystack.initiate_transfer = boom
     try:
         deliver(env)
-        batch = settlements.generate_batches(date.today() + timedelta(days=7))[0]
+        batch = settlements.generate_batches(datetime.utcnow().date() + timedelta(days=7))[0]
         res = env["client"].post(f"/admin/settlement-batches/{batch.id}/approve", headers=env["admin"])
         assert res.status_code == 400 and "Insufficient" in res.get_json()["message"]
     finally:
@@ -160,7 +160,7 @@ def test_clawback_before_payout_removes_the_sale(env):
     db.session.commit()
     assert SettlementLine.query.count() == 0
     assert settlements.merchant_owed_pesewas(env["plan"]) == 0
-    assert settlements.generate_batches(date.today() + timedelta(days=30)) == []
+    assert settlements.generate_batches(datetime.utcnow().date() + timedelta(days=30)) == []
 
 
 def test_clawback_before_delivery_means_nothing_is_ever_paid(env):
@@ -173,7 +173,7 @@ def test_clawback_before_delivery_means_nothing_is_ever_paid(env):
 def test_clawback_after_payout_comes_off_the_next_settlement(env):
     pay_config(env)
     deliver(env)
-    first = settlements.generate_batches(date.today() + timedelta(days=7))[0]
+    first = settlements.generate_batches(datetime.utcnow().date() + timedelta(days=7))[0]
     settlements.approve_and_pay(first, User.query.filter_by(role="admin").one())
 
     settlements.clawback_plan(env["plan"], "Defective, refunded")
@@ -187,7 +187,7 @@ def test_clawback_after_payout_comes_off_the_next_settlement(env):
                               gross_pesewas=400000, fee_pesewas=40000, net_pesewas=360000, description="test")
     db.session.add(new_sale)
     db.session.commit()
-    assert settlements.generate_batches(date.today() + timedelta(days=15)) == []
+    assert settlements.generate_batches(datetime.utcnow().date() + timedelta(days=15)) == []
 
 
 def test_customer_won_dispute_claws_back_automatically(env):
@@ -215,7 +215,7 @@ def test_merchant_changing_payout_details_holds_payouts(env):
     assert m.paystack_recipient_code is None and m.payout_hold_until > datetime.utcnow()
 
     deliver(env)
-    batch = settlements.generate_batches(date.today() + timedelta(days=7))[0]
+    batch = settlements.generate_batches(datetime.utcnow().date() + timedelta(days=7))[0]
     assert batch.status == Settlement.ON_HOLD
     res = env["client"].post(f"/admin/settlement-batches/{batch.id}/approve", headers=env["admin"])
     assert res.status_code == 400 and res.get_json()["outcome"] == "on_hold"
@@ -255,7 +255,7 @@ def test_invalid_payout_details_rejected(env):
 def test_statement_and_csv(env):
     pay_config(env)
     deliver(env)
-    batch = settlements.generate_batches(date.today() + timedelta(days=7))[0]
+    batch = settlements.generate_batches(datetime.utcnow().date() + timedelta(days=7))[0]
     settlements.approve_and_pay(batch, User.query.filter_by(role="admin").one())
     body = env["client"].get("/merchant/statement", headers=env["merchant_headers"]).get_json()
     assert body["totals"] == {"sales": 4000.0, "fees": 400.0, "clawbacks": 0.0, "paid_out": 3600.0}

@@ -303,18 +303,13 @@ class MerchantKYCResource(Resource):
 
 
 class MerchantCommissionResource(Resource):
+    """Turned off (go-live review): Merchant fees are set with the merchant fee tier (PUT /admin/merchants/<id>/fee-tier)."""
+
     @auth_required
-    def put(self, merchant_id):
-        if current_user().role != "admin":
+    def put(self, *args, **kwargs):
+        if current_user().role != 'admin':
             return {"error": "Unauthorized"}, 403
-        m = User.query.get(merchant_id)
-        if not m or m.role != "merchant":
-            return {"error": "Merchant not found"}, 404
-        data = request.get_json()
-        if 'commission_rate' in data:
-            m.commission_rate = data['commission_rate']
-        db.session.commit()
-        return {"message": "Commission updated", "commission_rate": safe_float(m.commission_rate)}
+        return {"error": 'Merchant fees are set with the merchant fee tier (PUT /admin/merchants/<id>/fee-tier).'}, 410
 
 
 class MerchantSettlementResource(Resource):

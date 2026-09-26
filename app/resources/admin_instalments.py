@@ -251,38 +251,13 @@ class AdminGetInstalmentPlanDetailResource(Resource):
 
 
 class AdminUpdateInstalmentStatusResource(Resource):
+    """Turned off (go-live review): A plan's status can't be set by hand."""
+
     @auth_required
-    def put(self, plan_id):
-        """Update instalment plan status"""
-        current_admin = current_user()
-        
-        if current_admin.role != 'admin':
+    def put(self, *args, **kwargs):
+        if current_user().role != 'admin':
             return {"error": "Unauthorized"}, 403
-        
-        data = request.get_json()
-        new_status = data.get('status')
-        reason = data.get('reason', '')
-        
-        if new_status not in ['active', 'completed', 'defaulted', 'cancelled']:
-            return {"error": "Invalid status"}, 400
-        
-        plan = InstalmentPlan.query.get(plan_id)
-        if not plan:
-            return {"error": "Instalment plan not found"}, 404
-        
-        old_status = plan.status
-        plan.status = new_status
-        
-        if new_status == 'completed':
-            plan.completed_at = datetime.now()
-        
-        db.session.commit()
-        
-        return {
-            "message": f"Plan status updated from {old_status} to {new_status}",
-            "plan_id": plan.plan_id,
-            "status": new_status
-        }, 200
+        return {"error": "A plan's status can't be set by hand: it would write off debt or hide a default without a ledger entry. Plans complete when paid, and are charged off by the daily servicing job at 90 days past due."}, 410
 
 
 class AdminApplyLateFeeResource(Resource):

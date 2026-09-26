@@ -109,17 +109,76 @@ def _signup_fraud_checks(user):
         current_app.logger.exception("Fraud checks failed at sign-up")
 
 
+def _client_ip():
+    """The address our proxy saw. The last X-Forwarded-For entry is the one Render's proxy adds;
+    earlier entries come from the client and can be made up, so they aren't used for limiting."""
+    try:
+        hops = [h.strip() for h in request.headers.get('X-Forwarded-For', '').split(',') if h.strip()]
+        return ((hops[-1] if hops else '') or request.remote_addr or '')[:64]
+    except RuntimeError:                   # outside a request (CLI, tests calling the service)
+        return ''
+
+
+def _login_blocked(identifier, ip, now):
+    """Too many recent failures for this phone/email (whether or not it exists), or from this IP."""
+    from ..models.login_attempt import LoginAttempt
+    cfg = current_app.config
+    window = now - timedelta(minutes=cfg.get('LOGIN_WINDOW_MINUTES', 15))
+    last_ok = db.session.query(db.func.max(LoginAttempt.created_at)).filter(
+        LoginAttempt.identifier == identifier, LoginAttempt.success.is_(True)).scalar()
+    since = max(window, last_ok) if last_ok else window
+    failures = LoginAttempt.query.filter(LoginAttempt.identifier == identifier, LoginAttempt.success.is_(False),
+                                         LoginAttempt.created_at > since).count()
+    if failures >= cfg.get('LOGIN_MAX_FAILURES', 5):
+        return True
+    if ip:
+        ip_failures = LoginAttempt.query.filter(LoginAttempt.ip == ip, LoginAttempt.success.is_(False),
+                                                LoginAttempt.created_at > window).count()
+        if ip_failures >= cfg.get('LOGIN_MAX_FAILURES_PER_IP', 30):
+            return True
+    return False
+
+
+def _record_login(identifier, ip, success, now):
+    from ..models.login_attempt import LoginAttempt
+    db.session.add(LoginAttempt(identifier=identifier[:120], ip=ip or None, success=success, created_at=now))
+    # Keep the table small: attempts older than 30 days aren't needed for limiting
+    if secrets.randbelow(50) == 0:
+        LoginAttempt.query.filter(LoginAttempt.created_at < now - timedelta(days=30)).delete()
+    db.session.commit()
+
+
 def login_user(identifier, password):
-    """Login with phone OR business_email. Returns a JWT or raises AuthError."""
+    """Login with phone OR business_email. Returns a JWT or raises AuthError.
+
+    Password guessing is limited: after LOGIN_MAX_FAILURES failures in LOGIN_WINDOW_MINUTES for one
+    phone/email (or LOGIN_MAX_FAILURES_PER_IP from one address) logins are refused with 429 until the
+    window passes. The check comes before the password is verified, and the answer is the same whether
+    or not the account exists.
+    """
     identifier = (identifier or '').strip()
     if not identifier or not password:
         raise AuthError('Phone and password are required', 400)
 
+    key = identifier.lower()
+    ip = _client_ip()
+    now = datetime.utcnow()
+    if _login_blocked(key, ip, now):
+        minutes = current_app.config.get('LOGIN_WINDOW_MINUTES', 15)
+        raise AuthError(f'Too many failed attempts. Please wait {minutes} minutes and try again, '
+                        'or reset your password.', 429)
+
     user = User.query.filter(
-        or_(User.phone == identifier, User.business_email == identifier.lower())
+        or_(User.phone == identifier, User.business_email == key)
     ).first()
 
-    if not user or not guard.pwd_ctx.verify(password, user.password):
+    if user:
+        ok = guard.pwd_ctx.verify(password, user.password)
+    else:
+        guard.pwd_ctx.dummy_verify()       # same time taken, so unknown accounts can't be told apart
+        ok = False
+    _record_login(key, ip, ok, now)
+    if not ok:
         raise AuthError('Invalid phone or password', 401)
 
     if user.status not in ('approved', 'active'):

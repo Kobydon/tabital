@@ -309,60 +309,22 @@ class AdminUpdateMerchantStatusResource(Resource):
 
 
 class AdminUpdateMerchantCommissionResource(Resource):
+    """Turned off (go-live review): Merchant fees are set with the merchant fee tier (PUT /admin/merchants/<id>/fee-tier)."""
+
     @auth_required
-    def put(self, merchant_id):
-        """Update merchant commission rate"""
-        current_admin = current_user()
-        
-        if current_admin.role != 'admin':
+    def put(self, *args, **kwargs):
+        if current_user().role != 'admin':
             return {"error": "Unauthorized"}, 403
-        
-        data = request.get_json()
-        commission_rate = data.get('commission_rate')
-        
-        if not commission_rate or commission_rate < 0 or commission_rate > 100:
-            return {"error": "Invalid commission rate"}, 400
-        
-        merchant = User.query.filter_by(id=merchant_id, role='merchant').first()
-        if not merchant:
-            return {"error": "Merchant not found"}, 404
-        
-        merchant.commission_rate = commission_rate
-        db.session.commit()
-        
-        return {
-            "message": f"Commission rate updated to {commission_rate}%",
-            "merchant_id": merchant.id,
-            "commission_rate": commission_rate
-        }, 200
+        return {"error": 'Merchant fees are set with the merchant fee tier (PUT /admin/merchants/<id>/fee-tier).'}, 410
 
 
 class AdminAdjustMerchantReserveResource(Resource):
+    """Turned off (go-live review): Merchant reserves aren't supported; this never changed anything."""
+
     @auth_required
-    def put(self, merchant_id):
-        """Adjust merchant reserve amount"""
-        current_admin = current_user()
-        
-        if current_admin.role != 'admin':
+    def put(self, *args, **kwargs):
+        if current_user().role != 'admin':
             return {"error": "Unauthorized"}, 403
-        
-        data = request.get_json()
-        reserve_amount = data.get('reserve_amount')
-        reason = data.get('reason', '')
-        
-        if not reserve_amount or reserve_amount < 0:
-            return {"error": "Invalid reserve amount"}, 400
-        
-        merchant = User.query.filter_by(id=merchant_id, role='merchant').first()
-        if not merchant:
-            return {"error": "Merchant not found"}, 404
-        
-        # Store reserve amount (you may need to add this field to User model)
-        # merchant.reserve_amount = reserve_amount
-        db.session.commit()
-        
-        return {
-            "message": f"Reserve amount adjusted to GHS {reserve_amount}",
-            "merchant_id": merchant.id,
-            "reserve_amount": reserve_amount
-        }, 200
+        return {"error": "Merchant reserves aren't supported; this never changed anything."}, 410
+
+

@@ -33,6 +33,10 @@ class Config:
 
     # Token lifetimes for flask_praetorian
     JWT_ACCESS_LIFESPAN = {"minutes": int(os.getenv("JWT_ACCESS_MINUTES", "60"))}
+    # Password guessing (services/auth_service.py login_user)
+    LOGIN_MAX_FAILURES = int(os.getenv("LOGIN_MAX_FAILURES", "5"))              # per phone/email
+    LOGIN_MAX_FAILURES_PER_IP = int(os.getenv("LOGIN_MAX_FAILURES_PER_IP", "30"))
+    LOGIN_WINDOW_MINUTES = int(os.getenv("LOGIN_WINDOW_MINUTES", "15"))
     JWT_REFRESH_LIFESPAN = {"days": int(os.getenv("JWT_REFRESH_DAYS", "7"))}
 
     # Paystack (CLAUDE.md §13.1 D11). Use sk_test_/pk_test_ keys until go-live.
