@@ -196,3 +196,22 @@ def test_customer_sees_schedule_and_late_fee(app_ctx):
     detail = client.get(f"/customer/instalments/{plan.id}", headers=h)
     if detail.status_code == 200:
         assert detail.get_json()["payment_schedule"][1]["amount_due"] == 880
+
+
+def test_shop_preview_and_plan_options(app_ctx):
+    """Vault shop: product cards and checkout get server-priced plans (§5.3 example)."""
+    client, _, _ = approved_plan(app_ctx)
+    customer = User.query.filter_by(role="customer").one()
+    h = token(client, customer.phone)
+    product = Product.query.first()
+    listed = client.get("/customer/products", headers=h).get_json()["products"]
+    preview = next(p for p in listed if p["id"] == product.id)["split_preview"]
+    assert preview["down_payment"] == 1600 and preview["installments"] == 3 and preview["installment_amount"] == 800
+    res = client.post("/customer/plan-options", headers=h, json={"product_id": product.id, "quantity": 1})
+    body = res.get_json()
+    assert res.status_code == 200 and [o["n_payments"] for o in body["options"]] == [1, 2, 3, 4]
+    p4 = body["options"][3]
+    assert p4["due_now"] == 1650 and p4["installment_amount"] == 800 and p4["total_payable"] == 4050
+    assert len(p4["payment_schedule"]) == 4 and body["key_facts"]["late_fee_cap_percentage"] == 25
+    assert body["options"][0]["available"] is True                     # paying in full needs no credit
+    assert client.post("/customer/plan-options", headers=h, json={"product_id": product.id, "quantity": 99}).status_code == 400

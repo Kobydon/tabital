@@ -496,8 +496,14 @@ from .resources.economics import (
 from .resources.business_settings import AdminBusinessSettingsResource, AdminBusinessSettingsHistoryResource
 
 
+from .resources.customer_product import CustomerPlanOptionsResource
+
+
 def register_routes(app):
     api = Api(app)
+
+    # Vault shop: every plan for a product, priced by the server, to compare side by side
+    api.add_resource(CustomerPlanOptionsResource, "/customer/plan-options")
 
     # Business settings: validated, audited (replaces the broken /api/system-settings page)
     api.add_resource(AdminBusinessSettingsResource, "/admin/business-settings")

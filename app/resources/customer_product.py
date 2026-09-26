@@ -61,11 +61,16 @@ class CustomerGetProductsResource(Resource):
         # Get paginated results
         products = query.order_by(Product.created_at.desc()).offset((page - 1) * limit).limit(limit).all()
         
+        # Pay in 4 preview on every card ("GHS X today, then 3 x GHS Y"), priced by the server with
+        # this customer's own down payment rate (Vault shop, §12: no amounts calculated in the UI)
+        tier_rate = _customer_dp_rate(current_customer)
+
         # Get merchant names for each product
         result = []
         for product in products:
             merchant = User.query.get(product.merchant_id)
             result.append({
+                "split_preview": _split_preview(product.price, tier_rate),
                 "id": product.id,
                 "product_id": product.product_id,
                 "name": product.name,
@@ -90,6 +95,98 @@ class CustomerGetProductsResource(Resource):
             "page": page,
             "limit": limit,
             "total_pages": (total + limit - 1) // limit
+        }, 200
+
+
+def _customer_dp_rate(customer):
+    """The customer's Pay in 4 down payment rate, or None for the configured default."""
+    from ..services import risk
+    try:
+        decision, _ = risk.decide(customer)
+        return decision.pay_in_4_dp_rate if decision.eligible else None
+    except Exception:          # noqa: BLE001 (a preview must never break the shop)
+        return None
+
+
+def _split_preview(price, tier_rate):
+    from ..models.system_settings import SystemSetting
+    from ..services import plan_engine
+    try:
+        plan = plan_engine.quote(price, 1, 4, SystemSetting.get_value, pay_in_4_dp_rate=tier_rate)
+    except plan_engine.PlanError:
+        return None
+    return {
+        "plan": "Pay in 4",
+        "down_payment": float(plan["down_payment"]),
+        "installments": plan["deferred_payments"],
+        "installment_amount": float(plan["installment_amount"]),
+        "delivery_fee": float(plan["delivery_fee"]),
+    }
+
+
+class CustomerPlanOptionsResource(Resource):
+    @auth_required
+    def post(self):
+        """Every standard plan for one product, priced by the server, to show side by side.
+
+        Each option has what's due today (down payment + delivery fee), the monthly amount, the
+        full schedule and the total payable, plus the customer's credit check for that plan.
+        """
+        from ..models.system_settings import SystemSetting
+        from ..services import plan_engine, risk
+        from .system_settings import _key_facts
+
+        customer = current_user()
+        if customer.role != "customer":
+            return {"error": "Unauthorized"}, 403
+        data = request.get_json() or {}
+        product = Product.query.get(data.get('product_id'))
+        if not product or product.status != 'active':
+            return {"error": "Product not available"}, 404
+        try:
+            quantity = int(data.get('quantity', 1))
+        except (TypeError, ValueError):
+            return {"error": "quantity must be a number"}, 400
+        if quantity < 1 or quantity > (product.stock_quantity or 0):
+            return {"error": "Requested quantity is not in stock"}, 400
+
+        decision, _ = risk.decide(customer)
+        credit = risk.decision_view(decision)
+        tier_rate = decision.pay_in_4_dp_rate if decision.eligible else None
+        options = []
+        for n in plan_engine.SUPPORTED_PLANS:
+            plan = plan_engine.quote(product.price, quantity, n, SystemSetting.get_value,
+                                     pay_in_4_dp_rate=tier_rate, in_store=bool(data.get('in_store')))
+            price = float(plan["price"])
+            if n == 1:
+                blocked = None
+            elif not decision.eligible:
+                blocked = (decision.reasons or ["You're not eligible for a payment plan yet"])[0]
+            elif price > float(credit.get("available_limit") or 0):
+                blocked = "This is above your available limit"
+            else:
+                blocked = None
+            options.append({
+                "n_payments": n,
+                "label": "Pay in full" if n == 1 else f"Pay in {n}",
+                "due_now": float(plan["due_now"]),
+                "down_payment": float(plan["down_payment"]),
+                "down_payment_percentage": float(plan["down_payment_rate"] * 100),
+                "delivery_fee": float(plan["delivery_fee"]),
+                "installments": plan["deferred_payments"],
+                "installment_amount": float(plan["installment_amount"]),
+                "total_payable": float(plan["total_payable"]),
+                "payment_schedule": plan_engine.schedule_to_json(plan["schedule"]),
+                "available": blocked is None,
+                "blocked_reason": blocked,
+            })
+        return {
+            "product_id": product.id,
+            "quantity": quantity,
+            "product_price": float(plan_engine.money(product.price) * quantity),
+            "options": options,
+            "credit": credit,
+            "key_facts": _key_facts(float(SystemSetting.get_value("late_fee_percentage", 10))),
         }, 200
 
 
