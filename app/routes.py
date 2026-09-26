@@ -497,6 +497,7 @@ from .resources.business_settings import AdminBusinessSettingsResource, AdminBus
 
 
 from .resources.customer_product import CustomerPlanOptionsResource
+from .resources.pii import AdminPiiRevealResource, AdminPiiAccessLogResource
 
 
 def register_routes(app):
@@ -504,6 +505,10 @@ def register_routes(app):
 
     # Vault shop: every plan for a product, priced by the server, to compare side by side
     api.add_resource(CustomerPlanOptionsResource, "/customer/plan-options")
+
+    # Masked personal data on admin screens: reveal one value with a reason (logged)
+    api.add_resource(AdminPiiRevealResource, "/admin/pii/reveal")
+    api.add_resource(AdminPiiAccessLogResource, "/admin/pii/access-log")
 
     # Business settings: validated, audited (replaces the broken /api/system-settings page)
     api.add_resource(AdminBusinessSettingsResource, "/admin/business-settings")

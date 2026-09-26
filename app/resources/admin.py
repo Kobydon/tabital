@@ -1,3 +1,4 @@
+from ..services import pii
 from flask import json
 from flask_restful import Resource, request
 from flask_praetorian import auth_required, current_user
@@ -113,7 +114,7 @@ class CustomerResource(Resource):
         allowed = ['full_name', 'business_name', 'phone', 'city', 'address', 'status',
                    'payment_plan', 'income_range', 'national_id', 'gps', 'ref_name', 'ref_phone', 'ref_relationship']
         for field in allowed:
-            if field in data and data[field] is not None:
+            if field in data and data[field] is not None and not pii.is_masked(data[field]):  # never save a masked value
                 setattr(user, field, data[field])
         db.session.commit()
         return {"message": "Customer updated successfully"}
@@ -216,7 +217,7 @@ class MerchantResource(Resource):
                    'business_type', 'registration_number', 'tax_id', 'business_address', 'business_phone',
                    'business_email', 'website', 'description', 'total_products', 'total_sales', 'rating', 'verified']
         for field in allowed:
-            if field in data and data[field] is not None:
+            if field in data and data[field] is not None and not pii.is_masked(data[field]):  # never save a masked value
                 setattr(m, field, data[field])
         try:
             apply_payout_details(m, {k: data[k] for k in PAYOUT_FIELDS if k in data and data[k] is not None},
@@ -365,7 +366,7 @@ class BulkUpdateCustomersResource(Resource):
             user = User.query.get(customer_id)
             if user and user.role == "customer":
                 for field in allowed_fields:
-                    if field in update_data:
+                    if field in update_data and not pii.is_masked(update_data[field]):
                         setattr(user, field, update_data[field])
                 updated_count += 1
         db.session.commit()

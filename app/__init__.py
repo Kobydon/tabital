@@ -13,6 +13,7 @@ from .models import payment_method as _payment_method_model  # noqa: F401
 from .models import settlement as _settlement_model  # noqa: F401
 from .models import identity as _identity_model  # noqa: F401
 from .models import deferment as _deferment_model  # noqa: F401
+from .models import pii_access as _pii_access_model  # noqa: F401
 from .routes import register_routes
 
 
@@ -43,8 +44,33 @@ def create_app():
 
     register_routes(app)
     register_commands(app)
+    register_pii_masking(app)
 
     return app
+
+
+def register_pii_masking(app):
+    """Admin screens get masked personal data by default (services/pii.py).
+
+    Applies to JSON responses under /admin/. The audited reveal endpoint (/admin/pii/…) is the
+    only way to see a full value.
+    """
+    import json
+    from flask import request
+    from .services import pii
+
+    @app.after_request
+    def _mask_admin_pii(response):
+        path = request.path or ""
+        if not path.startswith("/admin/") or path.startswith("/admin/pii/"):
+            return response
+        if response.status_code >= 400 or not response.is_json or response.direct_passthrough:
+            return response
+        data = response.get_json(silent=True)
+        if data is None:
+            return response
+        response.set_data(json.dumps(pii.mask_payload(data)))
+        return response
 
 
 def register_commands(app):

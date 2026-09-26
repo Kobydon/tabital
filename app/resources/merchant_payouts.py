@@ -28,6 +28,9 @@ def apply_payout_details(merchant, data, by_admin=False):
     Returns True if something changed.
     """
     changes = {}
+    # A masked value from an admin screen means 'unchanged' (services/pii.py)
+    from ..services.pii import is_masked
+    data = {k: v for k, v in data.items() if not is_masked(v)}
     if 'payout_method' in data:
         method = (data.get('payout_method') or '').strip()
         if method not in ('mobile_money', 'bank'):
