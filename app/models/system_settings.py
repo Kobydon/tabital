@@ -56,6 +56,21 @@ class SystemSetting(db.Model):
         return setting
 
 
+class SettingChange(db.Model):
+    """Audit log: who changed which business setting, from what, to what, and why."""
+    __tablename__ = 'setting_changes'
+
+    id = db.Column(db.Integer, primary_key=True)
+    setting_key = db.Column(db.String(100), nullable=False, index=True)
+    old_value = db.Column(db.Text)            # JSON
+    new_value = db.Column(db.Text, nullable=False)
+    changed_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    reason = db.Column(db.String(500), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    changer = db.relationship('User', foreign_keys=[changed_by])
+
+
 class TransactionCharge(db.Model):
     __tablename__ = 'transaction_charges'
     

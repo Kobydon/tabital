@@ -33,37 +33,11 @@ class SystemSettingsResource(Resource):
     
     @auth_required
     def put(self):
-        """Update system settings"""
-        current_admin = current_user()
-        
-        if current_admin.role != 'admin':
+        """Retired: wrote any key and value without validation or an audit trail."""
+        if current_user().role != 'admin':
             return {"error": "Unauthorized"}, 403
-        
-        data = request.get_json()
-        
-        # Update each setting
-        for key, value in data.items():
-            if key == 'installment_options':
-                setting_type = 'json'
-                setting_value = json.dumps(value)
-            elif isinstance(value, bool):
-                setting_type = 'boolean'
-                setting_value = str(value)
-            elif isinstance(value, (int, float)):
-                setting_type = 'number'
-                setting_value = str(value)
-            else:
-                setting_type = 'string'
-                setting_value = str(value)
-            
-            SystemSetting.set_value(
-                key=key,
-                value=setting_value,
-                value_type=setting_type,
-                updated_by=current_admin.id
-            )
-        
-        return {"message": "Settings updated successfully"}, 200
+        return {"error": "Settings are changed on the Business Settings page now (validated, with a reason). "
+                         "Use PUT /admin/business-settings."}, 410
 
 
 class InstallmentOptionsResource(Resource):
@@ -81,24 +55,10 @@ class InstallmentOptionsResource(Resource):
     
     @auth_required
     def put(self):
-        """Update installment options"""
-        current_admin = current_user()
-        
-        if current_admin.role != 'admin':
+        """Retired: the plans on offer are fixed by the plan engine (Pay in 2/3/4 and full, §4)."""
+        if current_user().role != 'admin':
             return {"error": "Unauthorized"}, 403
-        
-        data = request.get_json()
-        options = data.get('installment_options', [])
-        
-        SystemSetting.set_value(
-            key="installment_options",
-            value=json.dumps(options),
-            value_type="json",
-            description="Available installment plan options",
-            updated_by=current_admin.id
-        )
-        
-        return {"message": "Installment options updated successfully"}, 200
+        return {"error": "Instalment options can't be edited: the plans on offer are set by the business rules (§4)."}, 410
 from flask import request
 from flask_restful import Resource
 from flask_praetorian import auth_required, current_user

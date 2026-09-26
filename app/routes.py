@@ -493,8 +493,15 @@ from .resources.economics import (
 )
 
 
+from .resources.business_settings import AdminBusinessSettingsResource, AdminBusinessSettingsHistoryResource
+
+
 def register_routes(app):
     api = Api(app)
+
+    # Business settings: validated, audited (replaces the broken /api/system-settings page)
+    api.add_resource(AdminBusinessSettingsResource, "/admin/business-settings")
+    api.add_resource(AdminBusinessSettingsHistoryResource, "/admin/business-settings/history")
 
     # Unit economics and portfolio reporting (Phase 7)
     api.add_resource(AdminEconomicsSummaryResource, "/admin/economics/summary")
