@@ -35,11 +35,19 @@ Plans paused by an open dispute are skipped by all of the above.
 | `autopay_retry_days` | `[0, 1, 3]` | Days after the due date on which autopay tries |
 | `dispute_resolution_days` | 21 | Target days to resolve a dispute |
 
-## SMS provider
+## SMS provider: mNotify
 
-`SMS_PROVIDER=log` (the default) only writes messages to the server log.
+`SMS_PROVIDER=log` (the default) only writes messages to the server log. To send real SMS through **mNotify** (founder choice), set these environment variables:
 
-To send real SMS, implement a provider class in `app/services/sms.py` with `send(to, body)` returning `SendResult`, register it in `PROVIDERS`, and set `SMS_PROVIDER` to its name. Hubtel, Arkesel and mNotify are all options. Keep provider API keys in environment variables.
+| Variable | Value |
+|---|---|
+| `SMS_PROVIDER` | `mnotify` |
+| `MNOTIFY_API_KEY` | API key from the mNotify dashboard. Never commit it. |
+| `MNOTIFY_SENDER_ID` | Sender ID of 11 characters or fewer (default `TabitalPay`). It must be **registered and approved** in mNotify first. Unapproved sender IDs are rejected. |
+
+Messages use mNotify's Quick SMS API (`POST https://api.mnotify.com/api/sms/quick`). The campaign `_id` is stored as `provider_message_id` in `message_outbox`. A failed send is recorded with its error and retried up to 3 times. Check sent and failed messages at `GET /admin/messages`.
+
+Any other provider can be added by implementing `send(to, body)` in `app/services/sms.py` and registering it in `PROVIDERS`.
 
 ## Autopay
 

@@ -42,6 +42,10 @@ class Config:
     # SMS/WhatsApp provider for reminders: 'log' (default, writes to the log only) until a
     # Ghana provider is chosen (§13.1 D11)
     SMS_PROVIDER = os.getenv("SMS_PROVIDER", "log")
+    # mNotify (founder choice 2026-09-26). The sender ID must be registered and approved in mNotify.
+    MNOTIFY_API_KEY = os.getenv("MNOTIFY_API_KEY")
+    MNOTIFY_SENDER_ID = os.getenv("MNOTIFY_SENDER_ID", "TabitalPay")
+    MNOTIFY_BASE_URL = os.getenv("MNOTIFY_BASE_URL", "https://api.mnotify.com/api")
 
     # Mail settings for password reset
     MAIL_SERVER = os.getenv("MAIL_SERVER", "smtp.gmail.com")
