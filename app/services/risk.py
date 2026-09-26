@@ -14,7 +14,7 @@ from typing import List, Optional
 CENT = Decimal("0.01")
 
 RULES = {
-    "version": "2026-09-26.7",
+    "version": "2026-09-26.8",
     # Eligibility (hard declines)
     "min_age": 18,
     "min_monthly_salary": 2000,          # GHS, §2
@@ -54,6 +54,10 @@ RULES = {
     # Extended 6/12-month plans unlock after this many consecutive on-time purchases (D7).
     # They stay off until their terms are set (D12); this only reports eligibility.
     "extended_plan_min_consecutive_clean_plans": 3,
+    # A paid deferment (§4) is never a late payment, so it never lowers the limit or tier.
+    # Like a cured late payment, a plan with a deferment doesn't earn limit growth or
+    # promotion unless this is switched on (default pending founder confirmation).
+    "deferred_plans_count_as_clean": False,
 }
 
 
@@ -296,8 +300,13 @@ def facts_for(user, today=None) -> Facts:
                        key=lambda p: p.completed_at or p.created_at, reverse=True)
     # "Clean" = completed with no late payment at all. Plans with only cured late payments
     # aren't penalised, but they don't earn limit growth, low-tier promotion or streak credit.
+    from ..models.deferment import Deferment
+    deferred_plan_ids = set() if r.get("deferred_plans_count_as_clean") else {
+        d.plan_id for d in Deferment.query.filter(Deferment.plan_id.in_(plan_ids),
+                                                  Deferment.status == Deferment.APPLIED).all()} if plan_ids else set()
+
     def is_clean(plan):
-        return not late_by_plan.get(plan.id) and not cured_by_plan.get(plan.id)
+        return not late_by_plan.get(plan.id) and not cured_by_plan.get(plan.id) and plan.id not in deferred_plan_ids
 
     clean = [p for p in completed if is_clean(p)]
     consecutive = 0

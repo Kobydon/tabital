@@ -27,6 +27,7 @@ class InstalmentPayment(db.Model):
     # 0 = no fee yet, 1 = first fee (day after due), 2 = second fee (31+ days past due, §6.2)
     late_fee_stage = db.Column(db.Integer, default=0)
     second_late_fee_applied_date = db.Column(db.DateTime)
+    original_due_date = db.Column(db.DateTime)      # set when a deferment (§4) moved the due date
     
     # Timestamps
     created_at = db.Column(db.DateTime, default=datetime.utcnow)

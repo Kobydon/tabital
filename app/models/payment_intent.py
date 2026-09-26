@@ -20,6 +20,7 @@ class PaymentIntent(db.Model):
     # purpose values
     INSTALMENT = 'instalment'        # an instalment on an approved plan
     DOWN_PAYMENT = 'down_payment'    # Payment 1, collected at checkout before approval
+    DEFERMENT_FEE = 'deferment_fee'  # fee to push an instalment back a month (§4)
 
     id = db.Column(db.Integer, primary_key=True)
     reference = db.Column(db.String(64), unique=True, nullable=False, index=True)

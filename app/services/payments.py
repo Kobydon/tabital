@@ -89,6 +89,9 @@ def apply_verified_transaction(intent, data):
 
     if intent.purpose == PaymentIntent.DOWN_PAYMENT:
         return _apply_down_payment(intent)
+    if intent.purpose == PaymentIntent.DEFERMENT_FEE:
+        from . import deferment
+        return deferment.apply_paid(intent)
 
     payment = intent.payment
     if payment.status == 'paid':

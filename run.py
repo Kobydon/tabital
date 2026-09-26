@@ -63,6 +63,27 @@ def init_system_settings():
             "type": "number",
             "description": "Total late fees on a plan can't exceed this % of the order's total payable"
         },
+        # Deferment (§4, §13 #8 interim rule; confirm with the founder)
+        "deferment_enabled": {
+            "value": True,
+            "type": "boolean",
+            "description": "Customers may pay a fee to push an instalment back"
+        },
+        "deferment_fee_percentage": {
+            "value": 10,
+            "type": "number",
+            "description": "Deferment fee as a % of the deferred instalment (§4)"
+        },
+        "deferment_max_per_plan": {
+            "value": 1,
+            "type": "number",
+            "description": "How many deferments a customer may use on one plan (§13 #8)"
+        },
+        "deferment_months": {
+            "value": 1,
+            "type": "number",
+            "description": "How many months a deferment pushes the instalment (and the ones after it) back"
+        },
         "down_payment_percentage_short_plans": {
             "value": 50,
             "type": "number",

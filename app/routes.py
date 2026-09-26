@@ -481,8 +481,15 @@ from .resources.identity_fraud import (
 )
 
 
+from .resources.deferments import CustomerDefermentResource, AdminDefermentsResource
+
+
 def register_routes(app):
     api = Api(app)
+
+    # Instalment deferment (§4)
+    api.add_resource(CustomerDefermentResource, "/customer/plans/<int:plan_id>/deferment")
+    api.add_resource(AdminDefermentsResource, "/admin/deferments")
 
     # ============================================
     # IDENTITY (Smile ID) AND FRAUD CHECKS (Phase 6)

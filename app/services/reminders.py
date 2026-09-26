@@ -93,6 +93,9 @@ def queue_due_reminders(today=None):
         title, body = render(template, payment, plan)
         for channel in channels:
             key = f"{template}:{payment.id}:{channel}"
+            if payment.original_due_date is not None:
+                # Deferred (§4): the reminders run again for the new due date
+                key = f"{template}:{payment.id}:{payment.due_date:%Y%m%d}:{channel}"
             if MessageOutbox.query.filter_by(dedupe_key=key).first():
                 continue
             to = to_e164(customer.phone) if channel in ("sms", "whatsapp") else None

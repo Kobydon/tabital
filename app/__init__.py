@@ -12,6 +12,7 @@ from .models import message_outbox as _message_outbox_model  # noqa: F401
 from .models import payment_method as _payment_method_model  # noqa: F401
 from .models import settlement as _settlement_model  # noqa: F401
 from .models import identity as _identity_model  # noqa: F401
+from .models import deferment as _deferment_model  # noqa: F401
 from .routes import register_routes
 
 
