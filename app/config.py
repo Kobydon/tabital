@@ -25,6 +25,9 @@ class Config:
 
     DEBUG = os.getenv("FLASK_DEBUG", "0") == "1"
 
+    # Public URL of the web app (used in payment links / QR codes)
+    FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:4200")
+
     # Origins allowed to call the API from a browser
     CORS_ORIGINS = _csv("CORS_ORIGINS", "http://localhost:4200,https://app.tabitalpay.com")
 

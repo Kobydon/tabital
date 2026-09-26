@@ -128,6 +128,60 @@ def refund_transaction(reference, amount_pesewas=None, reason=None):
     return payload["data"]
 
 
+# ---------------------------------------------------------------- transfers (merchant payouts)
+
+def _get(path, params=None):
+    try:
+        res = requests.get(f"{_base()}{path}", params=params, headers=_headers(), timeout=TIMEOUT_SECONDS)
+        payload = res.json()
+    except (requests.RequestException, ValueError) as e:
+        raise PaystackError(f"Could not reach Paystack: {e}")
+    if res.status_code >= 400 or not payload.get("status"):
+        raise PaystackError(payload.get("message") or f"Paystack error {res.status_code}")
+    return payload["data"]
+
+
+def _post(path, body):
+    try:
+        res = requests.post(f"{_base()}{path}", json=body, headers=_headers(), timeout=TIMEOUT_SECONDS)
+        payload = res.json()
+    except (requests.RequestException, ValueError) as e:
+        raise PaystackError(f"Could not reach Paystack: {e}")
+    if res.status_code >= 400 or not payload.get("status"):
+        raise PaystackError(payload.get("message") or f"Paystack error {res.status_code}")
+    return payload["data"]
+
+
+def list_banks(payout_method):
+    """Ghana banks or MoMo providers with their Paystack codes: [{name, code}, ...]."""
+    params = {"currency": "GHS"}
+    if payout_method == "mobile_money":
+        params["type"] = "mobile_money"
+    return [{"name": b.get("name"), "code": b.get("code")} for b in _get("/bank", params)]
+
+
+def create_transfer_recipient(*, payout_method, name, account_number, bank_code):
+    """Register a merchant payout account. Returns the recipient_code."""
+    recipient_type = "mobile_money" if payout_method == "mobile_money" else "ghipss"
+    data = _post("/transferrecipient", {
+        "type": recipient_type, "name": name, "account_number": account_number,
+        "bank_code": bank_code, "currency": "GHS",
+    })
+    return data["recipient_code"]
+
+
+def initiate_transfer(*, amount_pesewas, recipient_code, reference, reason):
+    """Send money from the Paystack balance. Returns `data` (status: success/pending/otp/failed)."""
+    return _post("/transfer", {
+        "source": "balance", "amount": int(amount_pesewas), "recipient": recipient_code,
+        "reference": reference, "reason": reason[:100], "currency": "GHS",
+    })
+
+
+def verify_transfer(reference):
+    return _get(f"/transfer/verify/{reference}")
+
+
 def valid_webhook_signature(raw_body: bytes, signature: str) -> bool:
     """Paystack signs webhooks with HMAC-SHA512 of the raw body using the secret key."""
     if not signature or not is_configured():

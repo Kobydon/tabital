@@ -31,12 +31,25 @@ class CustomerPurchaseResource(Resource):
         # Only the product, plan, quantity and address come from the client.
         # Price, merchant and every amount are taken from the database and the plan engine.
         try:
-            product_id = int(data.get('product_id'))
+            # A payment link supplies the product itself, so product_id is optional then
+            product_id = int(data.get('product_id') or 0) if data.get('payment_link') else int(data.get('product_id'))
             quantity = int(data.get('quantity', 1))
             number_of_installments = int(data.get('number_of_installments', 4))
         except (TypeError, ValueError):
             return {"error": "product_id, quantity and number_of_installments must be numbers"}, 400
         delivery_address = (data.get('delivery_address') or '').strip()
+
+        # In-store / WhatsApp sale through a merchant payment link: product and quantity come
+        # from the link, and the link can only be used once
+        link = None
+        if data.get('payment_link'):
+            from ..models.settlement import PaymentLink
+            link = PaymentLink.query.filter_by(token=str(data['payment_link'])).with_for_update().first()
+            if not link or not link.is_usable():
+                return {"error": "This payment link has expired or was already used"}, 410
+            product_id, quantity = link.product_id, link.quantity
+            if not delivery_address:
+                delivery_address = "Collected in store"
         if not delivery_address:
             return {"error": "Delivery address is required"}, 400
 
@@ -98,6 +111,11 @@ class CustomerPurchaseResource(Resource):
         )
 
         db.session.add(order)
+        db.session.flush()
+        if link is not None:
+            order.payment_link_id = link.id
+            link.status = link.USED
+            link.used_by_order_id = order.id
         db.session.commit()
 
         body = {

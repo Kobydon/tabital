@@ -74,6 +74,14 @@ class User(db.Model):
     credit_limit_override = db.Column(db.Numeric(12, 2))         # admin override, with a reason on the assessment
     limit_updated_at = db.Column(db.DateTime)
 
+    # Merchant settlement and payouts (Phase 5)
+    settlement_period_days = db.Column(db.Integer, default=7)     # 3, 7 or 30 (§13.1 D4)
+    payout_method = db.Column(db.String(20))                      # mobile_money or bank
+    payout_bank_code = db.Column(db.String(20))                   # Paystack bank / MoMo provider code
+    paystack_recipient_code = db.Column(db.String(64))            # created from the current payout details
+    payout_details_updated_at = db.Column(db.DateTime)
+    payout_hold_until = db.Column(db.DateTime)                    # payouts paused after a details change
+
     # KYC Fields
     kyc_status = db.Column(db.String(50), default='pending')
     verification_level = db.Column(db.String(50), default='standard')

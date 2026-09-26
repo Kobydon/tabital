@@ -112,26 +112,20 @@ class MerchantUpdatePaymentSettingsResource(Resource):
         if current_merchant.role != "merchant":
             return {"error": "Unauthorized"}, 403
         
-        data = request.get_json()
-        
-        # Bank Account Settings
-        if 'bank_name' in data:
-            current_merchant.bank_name = data['bank_name']
-        if 'account_name' in data:
-            current_merchant.account_name = data['account_name']
-        if 'account_number' in data:
-            current_merchant.account_number = data['account_number']
-        
-        # Mobile Money Settings
-        if 'momo_name' in data:
-            current_merchant.momo_name = data['momo_name']
-        if 'momo_number' in data:
-            current_merchant.momo_number = data['momo_number']
-        
+        from .merchant_payouts import PayoutError, apply_payout_details
+
+        data = request.get_json() or {}
+
+        # Payout details go through one validated path: a change pauses payouts for 48 hours
+        try:
+            apply_payout_details(current_merchant, data)
+        except PayoutError as e:
+            return {"error": str(e)}, 400
+
         # Default Payment Method
         if 'payment_method' in data:
             current_merchant.payment_method = data['payment_method']
-        
+
         db.session.commit()
         
         return {"message": "Payment settings updated successfully"}, 200

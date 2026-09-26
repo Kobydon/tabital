@@ -207,16 +207,22 @@ class MerchantResource(Resource):
         m = User.query.get(merchant_id)
         if not m or m.role != "merchant":
             return {"error": "Merchant not found"}, 404
-        data = request.get_json()
+        from .merchant_payouts import PAYOUT_FIELDS, PayoutError, apply_payout_details
+
+        data = request.get_json() or {}
         allowed = ['full_name', 'business_name', 'owner_name', 'phone', 'city', 'address', 'status',
                    'payment_plan', 'income_range', 'national_id', 'gps', 'product_type', 'has_shop',
                    'shop_url', 'years_in_business', 'offers_credit', 'price_range', 'payment_method',
-                   'momo_name', 'momo_number', 'bank_name', 'account_name', 'account_number',
                    'business_type', 'registration_number', 'tax_id', 'business_address', 'business_phone',
                    'business_email', 'website', 'description', 'total_products', 'total_sales', 'rating', 'verified']
         for field in allowed:
             if field in data and data[field] is not None:
                 setattr(m, field, data[field])
+        try:
+            apply_payout_details(m, {k: data[k] for k in PAYOUT_FIELDS if k in data and data[k] is not None},
+                                 by_admin=True)
+        except PayoutError as e:
+            return {"error": str(e)}, 400
         db.session.commit()
         return {"message": "Merchant updated successfully"}
 
@@ -318,17 +324,15 @@ class MerchantSettlementResource(Resource):
         m = User.query.get(merchant_id)
         if not m or m.role != "merchant":
             return {"error": "Merchant not found"}, 404
-        data = request.get_json()
-        if 'pending_payout' in data:
-            m.pending_payout = data['pending_payout']
-        if 'next_settlement' in data:
-            m.next_settlement = data['next_settlement']
-        if 'bank_name' in data:
-            m.bank_name = data['bank_name']
-        if 'account_name' in data:
-            m.account_name = data['account_name']
-        if 'account_number' in data:
-            m.account_number = data['account_number']
+        from .merchant_payouts import PayoutError, apply_payout_details
+
+        data = request.get_json() or {}
+        # pending_payout/next_settlement are no longer editable: they come from settlement batches
+        try:
+            apply_payout_details(m, {k: data[k] for k in ('bank_name', 'account_name', 'account_number') if k in data},
+                                 by_admin=True)
+        except PayoutError as e:
+            return {"error": str(e)}, 400
         db.session.commit()
         return {"message": "Settlement updated"}
 
@@ -671,6 +675,7 @@ class AdminApproveOrderResource(Resource):
             db.session.add(transaction)
             db.session.flush()
             instalment_plan.transaction_id = transaction.id
+            order.transaction_id = transaction.id
 
             # Ledger: the contract, the merchant side, and the down payment if already received
             ledger.open_plan(instalment_plan, order.total_payable, commission_amount,

@@ -51,6 +51,7 @@ class DailyRunSummary:
     buckets: dict = field(default_factory=dict)
     reminders_queued: int = 0
     autopay_attempts: int = 0
+    settlements_created: int = 0
 
     def to_dict(self):
         return dict(self.__dict__)
@@ -114,5 +115,10 @@ def run_daily(today=None, send_reminders=True, run_autopay=True):
     if run_autopay:
         from . import autopay
         summary.autopay_attempts = autopay.run(today)
+
+    # Merchant settlement batches for billing cycles that ended today (Phase 5). Payouts still
+    # need an admin's approval before any money moves.
+    from . import settlements
+    summary.settlements_created = len(settlements.generate_batches(today))
 
     return summary

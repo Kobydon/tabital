@@ -228,6 +228,9 @@ class AdminResolveDisputeResource(Resource):
             plan.cancelled_at = now
             plan.paused_at = None
             d.refund_amount = float(ledger.plan_balance(plan)["paid"])
+            # The merchant doesn't keep the sale: not paid out, or recovered from the next settlement
+            from ..services import settlements
+            settlements.clawback_plan(plan, f"Dispute {d.dispute_id} won by customer", user=admin)
 
         d.status = 'resolved'
         d.resolution = outcome

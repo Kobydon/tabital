@@ -146,6 +146,20 @@ class PaystackWebhookResource(Resource):
         except ValueError:
             return {"error": "Invalid body"}, 400
 
+        # Merchant payouts (Phase 5)
+        if event.get('event') in ('transfer.success', 'transfer.failed', 'transfer.reversed'):
+            from ..services import settlements
+            reference = (event.get('data') or {}).get('reference')
+            if not reference:
+                return {"status": "ignored"}, 200
+            try:
+                outcome = settlements.handle_transfer_event(event['event'], reference)
+            except paystack.PaystackError as e:
+                db.session.rollback()
+                current_app.logger.warning("Paystack transfer verify failed for %s: %s", reference, e)
+                return {"error": "verify failed"}, 502
+            return {"status": outcome}, 200
+
         if event.get('event') != 'charge.success':
             return {"status": "ignored"}, 200
 

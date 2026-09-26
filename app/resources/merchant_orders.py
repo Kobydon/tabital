@@ -79,20 +79,25 @@ class MerchantUpdateDeliveryStatusResource(Resource):
             order.delivery_status = delivery_status
             
             if delivery_status == 'delivered':
+                from ..models.instalment import InstalmentPlan
+                from ..services import settlements
+
                 order.status = 'completed'
                 order.completed_at = datetime.now()
-                
-                # Update transaction status
-                transaction = Transaction.query.filter_by(
-                    customer_id=order.customer_id,
-                    merchant_id=order.merchant_id,
-                    product_name=order.product_name
-                ).first()
-                
+
+                # The order's own transaction (older orders fall back to the old match)
+                transaction = Transaction.query.get(order.transaction_id) if order.transaction_id else \
+                    Transaction.query.filter_by(customer_id=order.customer_id, merchant_id=order.merchant_id,
+                                                product_name=order.product_name).first()
+
                 if transaction:
                     transaction.status = 'completed'
                     transaction.payment_status = 'completed'
                     transaction.completion_date = datetime.now()
+                    # Delivered: the merchant's share goes into their next settlement (Phase 5)
+                    plan = InstalmentPlan.query.filter_by(transaction_id=transaction.id).first()
+                    if plan and plan.status not in ('cancelled',):
+                        settlements.record_delivery(plan, transaction)
         
         db.session.commit()
         

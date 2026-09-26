@@ -10,6 +10,7 @@ from .models import payment_intent as _payment_intent_model  # noqa: F401
 from .models import risk_assessment as _risk_assessment_model  # noqa: F401
 from .models import message_outbox as _message_outbox_model  # noqa: F401
 from .models import payment_method as _payment_method_model  # noqa: F401
+from .models import settlement as _settlement_model  # noqa: F401
 from .routes import register_routes
 
 

@@ -454,8 +454,40 @@ from .resources.servicing import (
 )
 
 
+from .resources.merchant_payouts import (
+    MerchantPayoutAccountResource,
+    MerchantPayoutBanksResource,
+    MerchantSettlementBatchesResource,
+    MerchantSettlementBatchResource,
+    MerchantStatementResource,
+    AdminSettlementBatchesResource,
+    AdminGenerateSettlementsResource,
+    AdminSettlementBatchResource,
+    AdminApproveSettlementResource,
+    MerchantPaymentLinksResource,
+    MerchantPaymentLinkResource,
+    CustomerPaymentLinkResource
+)
+
+
 def register_routes(app):
     api = Api(app)
+
+    # ============================================
+    # MERCHANT SETTLEMENTS, PAYOUTS, PAYMENT LINKS (Phase 5)
+    # ============================================
+    api.add_resource(MerchantPayoutAccountResource, "/merchant/payout-account")
+    api.add_resource(MerchantPayoutBanksResource, "/merchant/payout-banks")
+    api.add_resource(MerchantSettlementBatchesResource, "/merchant/settlement-batches")
+    api.add_resource(MerchantSettlementBatchResource, "/merchant/settlement-batches/<int:batch_id>")
+    api.add_resource(MerchantStatementResource, "/merchant/statement")
+    api.add_resource(AdminSettlementBatchesResource, "/admin/settlement-batches")
+    api.add_resource(AdminGenerateSettlementsResource, "/admin/settlement-batches/generate")
+    api.add_resource(AdminSettlementBatchResource, "/admin/settlement-batches/<int:batch_id>")
+    api.add_resource(AdminApproveSettlementResource, "/admin/settlement-batches/<int:batch_id>/approve")
+    api.add_resource(MerchantPaymentLinksResource, "/merchant/payment-links")
+    api.add_resource(MerchantPaymentLinkResource, "/merchant/payment-links/<int:link_id>")
+    api.add_resource(CustomerPaymentLinkResource, "/customer/payment-links/<string:token>")
 
     # ============================================
     # SERVICING: autopay cards, disputes, daily job (Phase 4)

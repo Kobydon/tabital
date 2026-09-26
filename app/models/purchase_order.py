@@ -45,6 +45,10 @@ class PurchaseOrder(db.Model):
     # Set when a paid order is rejected: refunded, refund_failed
     refund_status = db.Column(db.String(30))
     refund_reference = db.Column(db.String(100))
+    # Set on approval, so delivery updates the right transaction (was matched by product name)
+    transaction_id = db.Column(db.Integer, db.ForeignKey('transactions.id'), nullable=True)
+    # In-store / WhatsApp sale made through a merchant payment link
+    payment_link_id = db.Column(db.Integer, db.ForeignKey('payment_links.id'), nullable=True)
     # The underwriting decision this order was accepted under
     risk_assessment_id = db.Column(db.Integer, db.ForeignKey('risk_assessments.id'), nullable=True)
     

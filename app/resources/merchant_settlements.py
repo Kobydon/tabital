@@ -222,14 +222,15 @@ class MerchantUpdateSettlementSettingsResource(Resource):
         if current_merchant.role != "merchant":
             return {"error": "Unauthorized"}, 403
         
-        data = request.get_json()
-        
-        allowed_fields = ['bank_name', 'account_name', 'account_number']
-        
-        for field in allowed_fields:
-            if field in data:
-                setattr(current_merchant, field, data[field])
-        
+        from .merchant_payouts import PayoutError, apply_payout_details
+
+        data = request.get_json() or {}
+        payout_data = {k: data[k] for k in ('bank_name', 'account_name', 'account_number') if k in data}
+        try:
+            apply_payout_details(current_merchant, payout_data)
+        except PayoutError as e:
+            return {"error": str(e)}, 400
+
         db.session.commit()
         
         return {"message": "Settlement settings updated successfully"}, 200

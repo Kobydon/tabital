@@ -23,6 +23,8 @@ class LedgerEntry(db.Model):
     BALANCE_WRITTEN_OFF = 'balance_written_off'  # - remaining balance cancelled (e.g. dispute won by customer)
     MERCHANT_FEE = 'merchant_fee'          # merchant account: MDR kept by Tabital
     MERCHANT_PAYABLE = 'merchant_payable'  # merchant account: settlement owed to merchant
+    MERCHANT_SETTLED = 'merchant_settled'  # merchant account: - paid out to the merchant
+    MERCHANT_CLAWBACK = 'merchant_clawback'  # merchant account: - taken back (refund / dispute lost)
 
     CUSTOMER = 'customer'
     MERCHANT = 'merchant'
