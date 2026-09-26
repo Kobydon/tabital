@@ -484,8 +484,24 @@ from .resources.identity_fraud import (
 from .resources.deferments import CustomerDefermentResource, AdminDefermentsResource
 
 
+from .resources.economics import (
+    AdminEconomicsSummaryResource,
+    AdminEconomicsExportResource,
+    AdminEconomicsPortfolioResource,
+    AdminEconomicsCohortsResource,
+    AdminEconomicsScenarioResource
+)
+
+
 def register_routes(app):
     api = Api(app)
+
+    # Unit economics and portfolio reporting (Phase 7)
+    api.add_resource(AdminEconomicsSummaryResource, "/admin/economics/summary")
+    api.add_resource(AdminEconomicsExportResource, "/admin/economics/export")
+    api.add_resource(AdminEconomicsPortfolioResource, "/admin/economics/portfolio")
+    api.add_resource(AdminEconomicsCohortsResource, "/admin/economics/cohorts")
+    api.add_resource(AdminEconomicsScenarioResource, "/admin/economics/scenario")
 
     # Instalment deferment (§4)
     api.add_resource(CustomerDefermentResource, "/customer/plans/<int:plan_id>/deferment")

@@ -63,6 +63,27 @@ def init_system_settings():
             "type": "number",
             "description": "Total late fees on a plan can't exceed this % of the order's total payable"
         },
+        # Unit economics (§7, §13 #14): margin model rates, all in %
+        "gateway_fee_percentage": {
+            "value": 2, "type": "number",
+            "description": "Payment gateway cost as % of product price (included in the MDR, §6.1)"
+        },
+        "expected_credit_loss_percentage": {
+            "value": 5, "type": "number",
+            "description": "Expected default reserve as % of the financed balance (§7)"
+        },
+        "collections_cost_percentage": {
+            "value": 3, "type": "number",
+            "description": "Collections cost as % of the financed balance (§7)"
+        },
+        "fraud_loss_reserve_percentage": {
+            "value": 0, "type": "number",
+            "description": "Fraud loss reserve as % of the financed balance (§13 #14; not set yet)"
+        },
+        "cost_of_capital_annual_percentage": {
+            "value": 0, "type": "number",
+            "description": "Annual cost of the capital that funds the financed balance (§13 #14; not set yet)"
+        },
         # Deferment (§4, §13 #8 interim rule; confirm with the founder)
         "deferment_enabled": {
             "value": True,
