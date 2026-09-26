@@ -131,7 +131,7 @@ class InstallmentCalculatorResource(Resource):
             quantity = int(data.get('quantity', 1))
             number_of_installments = int(data.get('number_of_installments', 1))
             plan = plan_engine.quote(product_price, quantity, number_of_installments, SystemSetting.get_value,
-                                     pay_in_4_dp_rate=tier_dp_rate)
+                                     pay_in_4_dp_rate=tier_dp_rate, in_store=bool(data.get('in_store')))
         except (plan_engine.PlanError, ArithmeticError, TypeError, ValueError) as e:
             return {"error": str(e) or "Invalid plan request"}, 400
 

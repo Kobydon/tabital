@@ -188,29 +188,10 @@ class MerchantRequestPayoutResource(Resource):
         if current_merchant.role != "merchant":
             return {"error": "Unauthorized"}, 403
         
-        data = request.get_json()
-        amount = data.get('amount', 0)
-        
-        # Get pending transactions
-        pending_transactions = Transaction.query.filter(
-            Transaction.merchant_id == current_merchant.id,
-            Transaction.status == 'completed',
-            Transaction.payment_status == 'completed'
-        ).all()
-        
-        total_pending = sum(t.amount for t in pending_transactions)
-        
-        if amount > total_pending:
-            return {"error": "Requested amount exceeds pending settlements"}, 400
-        
-        # Here you would create a payout request in a separate table
-        # For now, we'll just return success
-        
-        return {
-            "message": "Payout request submitted successfully",
-            "amount": amount,
-            "estimated_date": (datetime.utcnow() + timedelta(days=3)).strftime('%d %b %Y')
-        }, 201
+        # Retired in Phase 5: this used to report success without paying anything. Payouts now
+        # run automatically on the merchant's settlement cycle (see /merchant/settlement-batches).
+        return {"error": "Payouts are automatic now. Delivered sales are paid on your "
+                         "settlement cycle (3, 7 or 30 days)."}, 410
 
 
 class MerchantUpdateSettlementSettingsResource(Resource):

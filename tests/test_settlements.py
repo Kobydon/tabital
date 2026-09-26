@@ -267,6 +267,28 @@ def test_statement_and_csv(env):
     assert listing["settlements"][0]["status"] == "paid" and listing["settlements"][0]["net"] == 3600.0
 
 
+def test_old_manual_payout_request_is_retired(env):
+    res = env["client"].post("/merchant/settlements/request-payout", headers=env["merchant_headers"],
+                             json={"amount": 100})
+    assert res.status_code == 410
+    # Nor can an admin tick transactions off as "settled" without a transfer
+    tx_id = PurchaseOrder.query.first().transaction_id
+    assert env["client"].post("/admin/settlements/process-bulk", headers=env["admin"],
+                              json={"settlement_ids": [tx_id]}).status_code == 410
+    assert env["client"].put(f"/admin/settlements/{tx_id}/process", headers=env["admin"],
+                             json={"payment_reference": "X"}).status_code == 410
+
+
+def test_in_store_quote_has_no_delivery_fee(env):
+    h = env["customer_headers"]
+    home = env["client"].post("/installment/calculate", headers=h,
+                              json={"product_price": 4000, "number_of_installments": 4}).get_json()
+    shop = env["client"].post("/installment/calculate", headers=h,
+                              json={"product_price": 4000, "number_of_installments": 4, "in_store": True}).get_json()
+    assert home["fees"]["delivery_fee"] > 0 and shop["fees"]["delivery_fee"] == 0
+    assert shop["totals"]["total_payable"] == 4000
+
+
 def test_delivery_updates_the_orders_own_transaction(env):
     """Two orders for the same product used to be matched by product name."""
     first_order = PurchaseOrder.query.one()
@@ -296,6 +318,7 @@ def test_payment_link_flow(env):
     order = PurchaseOrder.query.order_by(PurchaseOrder.id.desc()).first()
     assert order.product_id == product.id and order.quantity == 1                  # from the link
     assert order.delivery_address == "Collected in store" and order.payment_link_id == link["id"]
+    assert buy.get_json()["payment_schedule"][0]["delivery_fee"] == 0                # collected in store
 
     again = env["client"].post("/customer/purchase", headers=env["customer_headers"], json={
         "payment_link": link["token"], "number_of_installments": 4})

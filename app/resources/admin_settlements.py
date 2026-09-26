@@ -220,90 +220,27 @@ class AdminGetSettlementDetailResource(Resource):
         }, 200
 
 
+_RETIRED = ("Settlements are paid through settlement batches now: review and approve them under "
+            "/admin/settlement-batches. Marking transactions as settled by hand is no longer allowed.")
+
+
 class AdminProcessSettlementResource(Resource):
     @auth_required
     def post(self):
-        """Process bulk settlements"""
-        current_admin = current_user()
-        
-        if current_admin.role != 'admin':
+        """Retired in Phase 5: this marked transactions 'settled' without sending any money."""
+        if current_user().role != 'admin':
             return {"error": "Unauthorized"}, 403
-        
-        data = request.get_json()
-        settlement_ids = data.get('settlement_ids', [])
-        payment_method = data.get('payment_method', 'bank_transfer')
-        notes = data.get('notes', '')
-        
-        if not settlement_ids:
-            return {"error": "No settlements selected"}, 400
-        
-        processed = []
-        failed = []
-        
-        for settlement_id in settlement_ids:
-            transaction = Transaction.query.get(settlement_id)
-            if not transaction or transaction.status != 'completed':
-                failed.append({"id": settlement_id, "reason": "Invalid transaction"})
-                continue
-            
-            if transaction.payment_status == 'settled':
-                failed.append({"id": settlement_id, "reason": "Already settled"})
-                continue
-            
-            transaction.payment_status = 'settled'
-            transaction.payment_method = payment_method
-            transaction.notes = notes
-            processed.append({
-                "id": transaction.id,
-                "transaction_id": transaction.transaction_id,
-                "amount": transaction.payout_amount
-            })
-        
-        db.session.commit()
-        
-        return {
-            "message": f"Processed {len(processed)} settlements successfully",
-            "processed": processed,
-            "failed": failed
-        }, 200
+        return {"error": _RETIRED}, 410
 
 
 class AdminProcessSingleSettlementResource(Resource):
     @auth_required
     def put(self, settlement_id):
-        """Process a single settlement"""
-        current_admin = current_user()
-        
-        if current_admin.role != 'admin':
+        """Retired in Phase 5: this marked a transaction 'settled' (and overwrote its customer
+        payment reference) without sending any money."""
+        if current_user().role != 'admin':
             return {"error": "Unauthorized"}, 403
-        
-        data = request.get_json()
-        payment_method = data.get('payment_method', 'bank_transfer')
-        payment_reference = data.get('payment_reference', '')
-        notes = data.get('notes', '')
-        
-        transaction = Transaction.query.get(settlement_id)
-        if not transaction or transaction.status != 'completed':
-            return {"error": "Settlement not found"}, 404
-        
-        if transaction.payment_status == 'settled':
-            return {"error": "Settlement already processed"}, 400
-        
-        transaction.payment_status = 'settled'
-        transaction.payment_method = payment_method
-        transaction.payment_reference = payment_reference
-        transaction.notes = notes
-        
-        db.session.commit()
-        
-        return {
-            "message": "Settlement processed successfully",
-            "transaction_id": transaction.transaction_id,
-            "payout_amount": transaction.payout_amount,
-            "payment_method": payment_method,
-            "payment_reference": payment_reference
-        }, 200
-
+        return {"error": _RETIRED}, 410
 
 class AdminExportSettlementsResource(Resource):
     @auth_required

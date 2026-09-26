@@ -138,10 +138,11 @@ def down_payment_rate_for(n_payments, settings_get, pay_in_4_dp_rate=None):
     return rate(settings_get("down_payment_percentage_short_plans", 50)) / 100
 
 
-def quote(price, quantity, n_payments, settings_get, start=None, pay_in_4_dp_rate=None):
+def quote(price, quantity, n_payments, settings_get, start=None, pay_in_4_dp_rate=None, in_store=False):
     """Build a plan using the current system settings (and the customer's tier, if given).
 
-    settings_get(key, default) is normally SystemSetting.get_value.
+    settings_get(key, default) is normally SystemSetting.get_value. in_store: collected at
+    the merchant (payment link / QR sale), so there's no delivery fee.
     """
     quantity = int(quantity)
     if quantity < 1:
@@ -152,7 +153,7 @@ def quote(price, quantity, n_payments, settings_get, start=None, pay_in_4_dp_rat
         dp_rate=down_payment_rate_for(n_payments, settings_get, pay_in_4_dp_rate),
         service_fee=settings_get("service_fee", 0),
         mdr=rate(settings_get("merchant_fee_percentage", 10)) / 100,
-        delivery_fee=settings_get("delivery_fee", 50),
+        delivery_fee=0 if in_store else settings_get("delivery_fee", 50),
         start=start,
     )
 
