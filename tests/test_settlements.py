@@ -339,3 +339,18 @@ def test_expired_link_and_other_merchants_products(env):
     res = env["client"].post("/merchant/payment-links", headers=token(env["client"], other.phone),
                              json={"product_id": product.id})
     assert res.status_code == 400
+
+
+def test_merchant_orders_show_payout_and_search(env):
+    """Vault orders: payout from the ledger (P x (1 - MDR)), settlement status, working search."""
+    body = env["client"].get("/merchant/orders", headers=env["merchant_headers"]).get_json()
+    o = body["orders"][0]
+    assert o["product_total"] == 4000 and o["merchant_fee"] == 400 and o["merchant_payout"] == 3600
+    assert o["payout_estimated"] is False and o["payout_status"] == "after_delivery"
+    deliver(env)
+    o = env["client"].get("/merchant/orders", headers=env["merchant_headers"]).get_json()["orders"][0]
+    assert o["payout_status"] == "next_settlement"
+    none = env["client"].get("/merchant/orders?search=nothing-like-this", headers=env["merchant_headers"]).get_json()
+    assert none["orders"] == []
+    hit = env["client"].get("/merchant/orders?search=Phone", headers=env["merchant_headers"]).get_json()
+    assert len(hit["orders"]) == 1
