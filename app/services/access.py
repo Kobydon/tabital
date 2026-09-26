@@ -29,6 +29,7 @@ OPERATIONS_WRITES = [
 MANAGEMENT_READS = [
     re.compile(r"^/admin/pii/"),
     re.compile(r"^/admin/economics/"),
+    re.compile(r"^/admin/reports/"),                       # revenue and KPIs: business financials
     re.compile(r"^/admin/business-settings"),
     re.compile(r"^/admin/settings/"),
     re.compile(r"^/admin/team"),

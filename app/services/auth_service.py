@@ -109,78 +109,48 @@ def _signup_fraud_checks(user):
         current_app.logger.exception("Fraud checks failed at sign-up")
 
 
-def _client_ip():
-    """The address our proxy saw. The last X-Forwarded-For entry is the one Render's proxy adds;
-    earlier entries come from the client and can be made up, so they aren't used for limiting."""
-    try:
-        hops = [h.strip() for h in request.headers.get('X-Forwarded-For', '').split(',') if h.strip()]
-        return ((hops[-1] if hops else '') or request.remote_addr or '')[:64]
-    except RuntimeError:                   # outside a request (CLI, tests calling the service)
-        return ''
-
-
-def _login_blocked(identifier, ip, now):
-    """Too many recent failures for this phone/email (whether or not it exists), or from this IP."""
-    from ..models.login_attempt import LoginAttempt
-    cfg = current_app.config
-    window = now - timedelta(minutes=cfg.get('LOGIN_WINDOW_MINUTES', 15))
-    last_ok = db.session.query(db.func.max(LoginAttempt.created_at)).filter(
-        LoginAttempt.identifier == identifier, LoginAttempt.success.is_(True)).scalar()
-    since = max(window, last_ok) if last_ok else window
-    failures = LoginAttempt.query.filter(LoginAttempt.identifier == identifier, LoginAttempt.success.is_(False),
-                                         LoginAttempt.created_at > since).count()
-    if failures >= cfg.get('LOGIN_MAX_FAILURES', 5):
-        return True
-    if ip:
-        ip_failures = LoginAttempt.query.filter(LoginAttempt.ip == ip, LoginAttempt.success.is_(False),
-                                                LoginAttempt.created_at > window).count()
-        if ip_failures >= cfg.get('LOGIN_MAX_FAILURES_PER_IP', 30):
-            return True
-    return False
-
-
-def _record_login(identifier, ip, success, now):
-    from ..models.login_attempt import LoginAttempt
-    db.session.add(LoginAttempt(identifier=identifier[:120], ip=ip or None, success=success, created_at=now))
-    # Keep the table small: attempts older than 30 days aren't needed for limiting
-    if secrets.randbelow(50) == 0:
-        LoginAttempt.query.filter(LoginAttempt.created_at < now - timedelta(days=30)).delete()
-    db.session.commit()
-
-
 def login_user(identifier, password):
     """Login with phone OR business_email. Returns a JWT or raises AuthError.
 
-    Password guessing is limited: after LOGIN_MAX_FAILURES failures in LOGIN_WINDOW_MINUTES for one
-    phone/email (or LOGIN_MAX_FAILURES_PER_IP from one address) logins are refused with 429 until the
-    window passes. The check comes before the password is verified, and the answer is the same whether
-    or not the account exists.
+    Guessing is limited (services/attempts.py): LOGIN_MAX_FAILURES failures per account in
+    LOGIN_WINDOW_MINUTES, and password spraying from one address across many accounts. The attempt
+    is recorded before the password is checked, and the answer is the same whether or not the
+    account exists (a dummy hash check keeps the timing the same too).
     """
+    from . import attempts
+    from ..models.login_attempt import LoginAttempt
+
     identifier = (identifier or '').strip()
     if not identifier or not password:
         raise AuthError('Phone and password are required', 400)
 
     key = identifier.lower()
-    ip = _client_ip()
+    cfg = current_app.config
     now = datetime.utcnow()
-    if _login_blocked(key, ip, now):
-        minutes = current_app.config.get('LOGIN_WINDOW_MINUTES', 15)
-        raise AuthError(f'Too many failed attempts. Please wait {minutes} minutes and try again, '
-                        'or reset your password.', 429)
+    window = now - timedelta(minutes=cfg.get('LOGIN_WINDOW_MINUTES', 15))
+    ip = attempts.client_ip()
 
     user = User.query.filter(
         or_(User.phone == identifier, User.business_email == key)
     ).first()
+    subject = attempts.subject_for(user, key)
+
+    attempt = attempts.begin(LoginAttempt.LOGIN, subject, key, ip, now)
+    if (attempts.failures(LoginAttempt.LOGIN, subject, window) > cfg.get('LOGIN_MAX_FAILURES', 5)
+            or attempts.ip_spraying(LoginAttempt.LOGIN, ip, subject, window,
+                                    cfg.get('LOGIN_MAX_ACCOUNTS_PER_IP', 20))):
+        minutes = cfg.get('LOGIN_WINDOW_MINUTES', 15)
+        raise AuthError(f'Too many failed attempts. Please wait {minutes} minutes and try again, '
+                        'or reset your password.', 429)
 
     if user:
         ok = guard.pwd_ctx.verify(password, user.password)
     else:
         guard.pwd_ctx.dummy_verify()       # same time taken, so unknown accounts can't be told apart
         ok = False
-    _record_login(key, ip, ok, now)
     if not ok:
         raise AuthError('Invalid phone or password', 401)
-
+    attempts.succeed(attempt)
     if user.status not in ('approved', 'active'):
         raise AuthError('Account not approved yet. Please wait for admin approval.', 403)
 
@@ -300,8 +270,9 @@ class ForgotPasswordResource(Resource):
             )
             mail.send(msg)
         except Exception:
+            # Logged, but the answer stays the same: an error only for real accounts would tell
+            # anyone which emails are registered
             current_app.logger.exception("Failed to send password reset email")
-            return {"error": "Failed to send reset email. Please try again."}, 500
 
         return _generic_reset_response()
 
@@ -316,23 +287,37 @@ class VerifyResetOTPResource(Resource):
         if not email or not otp:
             return {"error": "Email and OTP are required"}, 400
 
+        # One answer for every failure (unknown email, no code, wrong or expired code), so this can't
+        # be used to find accounts. Attempts are recorded first, then counted: at most
+        # OTP_MAX_ATTEMPTS per code, OTP_MAX_FAILURES_PER_DAY per account, and spraying from one
+        # address across accounts is refused (services/attempts.py).
+        from . import attempts
+        from ..models.login_attempt import LoginAttempt
+        bad = ({"error": "That code is wrong or has expired. Request a new code and try again."}, 401)
+        cfg = current_app.config
+        now = datetime.utcnow()
+        ip = attempts.client_ip()
         user = User.query.filter_by(business_email=email).first()
-        if not user or not user.reset_otp:
-            return {"error": "Invalid or expired OTP code"}, 401
+        subject = attempts.subject_for(user, email)
+        attempt = attempts.begin(LoginAttempt.OTP, subject, email, ip, now)
 
-        if user.reset_otp_expiry and user.reset_otp_expiry < datetime.utcnow():
-            return {"error": "OTP has expired. Please request a new one."}, 401
+        day = now - timedelta(days=1)
+        if (attempts.failures(LoginAttempt.OTP, subject, day) > cfg.get('OTP_MAX_FAILURES_PER_DAY', 10)
+                or attempts.ip_spraying(LoginAttempt.OTP, ip, subject, day, cfg.get('OTP_MAX_ACCOUNTS_PER_IP', 10))):
+            return {"error": "Too many attempts. Please try again tomorrow or contact support."}, 429
 
-        if (user.reset_otp_attempts or 0) >= OTP_MAX_ATTEMPTS:
-            user.reset_otp = None
+        if not user or not user.reset_otp or not user.reset_otp_expiry or user.reset_otp_expiry < now:
+            hmac.compare_digest("000000", otp)          # same work either way
+            return bad
+        issued = user.reset_otp_expiry - OTP_TTL
+        if attempts.failures(LoginAttempt.OTP, subject, issued) > OTP_MAX_ATTEMPTS:
+            user.reset_otp = None                         # this code is used up
             db.session.commit()
-            return {"error": "Too many attempts. Please request a new code."}, 429
-
+            return bad
         if not hmac.compare_digest(user.reset_otp, otp):
-            user.reset_otp_attempts = (user.reset_otp_attempts or 0) + 1
-            db.session.commit()
-            return {"error": "Invalid OTP code"}, 401
+            return bad
 
+        attempts.succeed(attempt)
         user.reset_otp = None
         user.reset_otp_attempts = 0
         user.reset_token = secrets.token_urlsafe(32)
@@ -372,6 +357,9 @@ class ResetPasswordResource(Resource):
         user.reset_token = None
         user.reset_token_expiry = None
         db.session.commit()
+        # A lock from failed sign-ins can't keep the owner out after they've proved it's them
+        from . import attempts
+        attempts.clear(user)
 
         recipient = user.business_email or user.email
         if recipient:

@@ -1,4 +1,5 @@
 from flask_restful import Resource, request
+from ..services import merchant_fees
 from flask_praetorian import auth_required, current_user
 from ..models.user import User
 from ..models.transaction import Transaction
@@ -232,7 +233,7 @@ class MerchantAccountStatusResource(Resource):
             "business_email": safe_str(current_merchant.business_email),
             "business_phone": safe_str(current_merchant.business_phone),
             "verified": current_merchant.verified,
-            "commission_rate": safe_float(current_merchant.commission_rate)
+            "commission_rate": merchant_fees.describe(current_merchant)["fee_percentage"]   # current tier (§6.1)
         }
 
 

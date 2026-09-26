@@ -22,8 +22,9 @@ def to_cedis(pesewas) -> Decimal:
 
 
 def record(plan, entry_type, amount, *, account=LedgerEntry.CUSTOMER, payment=None,
-           reference=None, note=None, user=None):
-    """Append one entry. `amount` is in GHS and carries its sign (see LedgerEntry)."""
+           reference=None, note=None, user=None, at=None):
+    """Append one entry. `amount` is in GHS and carries its sign (see LedgerEntry).
+    `at` backdates the entry; only the ledger-backfill command uses it (historical plans)."""
     if plan.id is None:
         db.session.flush()
     entry = LedgerEntry(
@@ -36,6 +37,8 @@ def record(plan, entry_type, amount, *, account=LedgerEntry.CUSTOMER, payment=No
         note=note,
         created_by=user.id if user is not None else None,
     )
+    if at is not None:
+        entry.created_at = at
     db.session.add(entry)
     return entry
 

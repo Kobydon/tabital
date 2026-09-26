@@ -271,7 +271,7 @@ class AdminGetMerchantDetailResource(Resource):
                 "total_gmv": float(total_gmv),
                 "total_outstanding": float(total_outstanding),
                 "total_commission": float(total_commission),
-                "commission_rate": merchant.commission_rate or 10,
+                "commission_rate": merchant_fees.describe(merchant)["fee_percentage"],   # current tier (§6.1)
                 "total_products": total_products,
                 "active_plans": active_plans,
                 "pending_payout": float(merchant.pending_payout or 0)

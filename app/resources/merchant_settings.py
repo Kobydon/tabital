@@ -1,4 +1,5 @@
 from flask_restful import Resource, request
+from ..services import merchant_fees
 from flask_praetorian import auth_required, current_user
 from ..models.user import User
 from ..models.transaction import Transaction
@@ -43,7 +44,7 @@ class MerchantGetProfileResource(Resource):
             "verified": safe_bool(current_merchant.verified),
             "kyc_status": safe_str(current_merchant.kyc_status),
             "verification_level": safe_str(current_merchant.verification_level),
-            "commission_rate": safe_float(current_merchant.commission_rate),
+            "commission_rate": merchant_fees.describe(current_merchant)["fee_percentage"],   # current tier (§6.1)
             "payment_method": safe_str(current_merchant.payment_method),
             "bank_name": safe_str(current_merchant.bank_name),
             "account_name": safe_str(current_merchant.account_name),

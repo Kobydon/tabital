@@ -91,9 +91,7 @@ class GetTransactionsResource(Resource):
                 "notes": safe_str(t.notes),
                 "created_at": t.created_at.isoformat() if t.created_at else "",
                 # Payout information
-                "commission_rate": safe_float(getattr(t, 'commission_rate', 10)),
-                "commission_amount": safe_float(getattr(t, 'commission_amount', 0)),
-                "payout_amount": safe_float(getattr(t, 'payout_amount', 0)),
+                **merchant_fees.transaction_fields(t),   # fee from the stored payout (tier, §6.1)
                 "is_instalment": getattr(t, 'payment_plan', None) is not None
             } for t in transactions
         ]
@@ -121,33 +119,33 @@ class UpdateTransactionStatusResource(Resource):
         if not transaction:
             return {"error": "Transaction not found"}, 404
         
-        # Money states (status, payment_status) are admin-only. Merchants may update
-        # fulfilment details on their own transactions. Customers can't edit transactions.
-        if current_user_obj.role == 'admin':
-            allowed_fields = ['status', 'payment_status', 'delivery_status', 'tracking_number', 'payment_reference', 'notes']
-        elif current_user_obj.role == 'merchant' and transaction.merchant_id == current_user_obj.id:
-            allowed_fields = ['delivery_status', 'tracking_number', 'notes']
+        # Only fulfilment details can be edited here. Money states (status, payment_status,
+        # payment_reference) follow the payments and the ledger; delivery is confirmed by the merchant
+        # through /merchant/orders/<id>/delivery, which makes the sale payable (settlements).
+        if current_user_obj.role == 'admin' or (current_user_obj.role == 'merchant'
+                                                and transaction.merchant_id == current_user_obj.id):
+            allowed_fields = ['tracking_number', 'notes']
         else:
             return {"error": "Unauthorized"}, 403
 
         data = request.get_json() or {}
-        
+        refused = [f for f in ('status', 'payment_status', 'payment_reference', 'delivery_status') if f in data]
+        if refused:
+            return {"error": "Only the tracking number and notes can be changed here. Delivery is confirmed on "
+                             "the merchant's Orders screen; payment states follow the payments."}, 400
+
         for field in allowed_fields:
             if field in data:
                 setattr(transaction, field, data[field])
-        
-        if data.get('status') == 'completed' and not transaction.completion_date:
-            transaction.completion_date = datetime.utcnow()
-        
         db.session.commit()
-        
+
+        fee, payout = merchant_fees.transaction_split(transaction)
         return {
             "message": "Transaction updated successfully",
             "transaction_id": transaction.transaction_id,
             "amount": transaction.amount,
-            "commission_rate": getattr(transaction, 'commission_rate', 10),
-            "commission_amount": getattr(transaction, 'commission_amount', 0),
-            "payout_amount": getattr(transaction, 'payout_amount', 0)
+            "commission_amount": fee,
+            "payout_amount": payout
         }, 200
 
 
@@ -207,22 +205,13 @@ class GetTransactionStatsResource(Resource):
 
 
 class DeleteTransactionResource(Resource):
+    """Turned off (go-live review): Transactions are financial records and can't be deleted."""
+
     @auth_required
-    def delete(self, transaction_id):
-        """Delete a transaction (admin only)"""
-        current_user_obj = current_user()
-        
-        if current_user_obj.role != 'admin':
+    def delete(self, *args, **kwargs):
+        if current_user().role not in ('admin', 'merchant', 'customer'):
             return {"error": "Unauthorized"}, 403
-        
-        transaction = Transaction.query.get(transaction_id)
-        if not transaction:
-            return {"error": "Transaction not found"}, 404
-        
-        db.session.delete(transaction)
-        db.session.commit()
-        
-        return {"message": "Transaction deleted successfully"}, 200
+        return {"error": "Transactions are financial records and can't be deleted."}, 410
 
 
 class MerchantGetTransactionsResource(Resource):
@@ -280,8 +269,9 @@ class MerchantGetTransactionsResource(Resource):
         transactions = query.order_by(Transaction.created_at.desc()).offset((page - 1) * limit).limit(limit).all()
         
         # Calculate total payout for filtered transactions
-        total_payout = sum(getattr(t, 'payout_amount', 0) or 0 for t in transactions)
-        total_commission = sum(getattr(t, 'commission_amount', 0) or 0 for t in transactions)
+        splits = [merchant_fees.transaction_split(t) for t in transactions]
+        total_payout = sum(p for _f, p in splits)
+        total_commission = sum(f for f, _p in splits)
         
         return {
             "transactions": [{
@@ -305,9 +295,7 @@ class MerchantGetTransactionsResource(Resource):
                 "created_at": t.created_at.isoformat() if t.created_at else "",
                 "is_instalment": t.payment_plan is not None and t.payment_plan != '',
                 # Payout information for merchants
-                "commission_rate": safe_float(getattr(t, 'commission_rate', 10)),
-                "commission_amount": safe_float(getattr(t, 'commission_amount', 0)),
-                "payout_amount": safe_float(getattr(t, 'payout_amount', 0))
+                **merchant_fees.transaction_fields(t)   # fee from the stored payout (tier, §6.1)
             } for t in transactions],
             "total": total,
             "page": page,
@@ -392,23 +380,26 @@ class MerchantUpdateTransactionStatusResource(Resource):
         
         data = request.get_json() or {}
 
-        # Merchants can't set status/payment_status: those drive settlements.
-        # Delivery is confirmed through /merchant/orders/<id>/delivery.
-        allowed_fields = ['delivery_status', 'tracking_number', 'notes']
+        # Merchants can't set status/payment_status: those drive settlements. Delivery is
+        # confirmed through /merchant/orders/<id>/delivery, which creates the settlement line.
+        if any(f in data for f in ('status', 'payment_status', 'payment_reference', 'delivery_status')):
+            return {"error": "Confirm delivery on your Orders screen. Only the tracking number and notes "
+                             "can be changed here."}, 400
+        allowed_fields = ['tracking_number', 'notes']
 
         for field in allowed_fields:
             if field in data:
                 setattr(transaction, field, data[field])
 
         db.session.commit()
-        
+
+        fee, payout = merchant_fees.transaction_split(transaction, current_merchant)
         return {
             "message": "Transaction updated successfully",
             "transaction_id": transaction.transaction_id,
             "amount": transaction.amount,
-            "commission_rate": getattr(transaction, 'commission_rate', 10),
-            "commission_amount": getattr(transaction, 'commission_amount', 0),
-            "payout_amount": getattr(transaction, 'payout_amount', 0)
+            "commission_amount": fee,
+            "payout_amount": payout
         }, 200
 
 
@@ -426,59 +417,34 @@ class MerchantUpdateTransactionResource(Resource):
         if not transaction or transaction.merchant_id != current_merchant.id:
             return {"error": "Transaction not found"}, 404
         
-        data = request.get_json()
-        
-        allowed_fields = ['delivery_address', 'tracking_number', 'notes', 'payment_reference']
-        
+        data = request.get_json() or {}
+
+        # Fulfilment details only; the payment reference belongs to the payment records
+        if any(f in data for f in ('status', 'payment_status', 'payment_reference', 'delivery_status')):
+            return {"error": "Only the delivery address, tracking number and notes can be changed here."}, 400
+        allowed_fields = ['delivery_address', 'tracking_number', 'notes']
+
         for field in allowed_fields:
             if field in data:
                 setattr(transaction, field, data[field])
-        
+
         db.session.commit()
-        
+
         return {
             "message": "Transaction updated successfully",
             "transaction_id": transaction.transaction_id,
-            "payout_amount": getattr(transaction, 'payout_amount', 0)
+            "payout_amount": merchant_fees.transaction_split(transaction, current_merchant)[1]
         }, 200
 
 
 class MerchantRefundTransactionResource(Resource):
+    """Turned off (go-live review): Refunds go through a dispute (the customer opens it and Tabital resolves it) or an order rejection; marking a sale refunded here didn't move any money or stop the customer's plan."""
+
     @auth_required
-    def post(self, transaction_id):
-        """Process a refund for a transaction"""
-        current_merchant = current_user()
-        
-        if current_merchant.role != "merchant":
+    def post(self, *args, **kwargs):
+        if current_user().role != 'merchant':
             return {"error": "Unauthorized"}, 403
-        
-        transaction = Transaction.query.get(transaction_id)
-        
-        if not transaction or transaction.merchant_id != current_merchant.id:
-            return {"error": "Transaction not found"}, 404
-        
-        if transaction.status != 'completed':
-            return {"error": "Only completed transactions can be refunded"}, 400
-        
-        data = request.get_json()
-        refund_amount = data.get('refund_amount', transaction.amount)
-        reason = data.get('reason', '')
-        
-        # Calculate refund impact on payout
-        refund_payout_impact = refund_amount * (1 - (getattr(transaction, 'commission_rate', 10) / 100))
-        
-        transaction.status = 'refunded'
-        transaction.payment_status = 'refunded'
-        transaction.notes = f"Refunded: {reason}" if reason else transaction.notes
-        
-        db.session.commit()
-        
-        return {
-            "message": f"Refund of {refund_amount} processed successfully",
-            "refund_amount": refund_amount,
-            "refund_payout_impact": refund_payout_impact,
-            "transaction_id": transaction.transaction_id
-        }, 200
+        return {"error": "Refunds go through a dispute (the customer opens it and Tabital resolves it) or an order rejection; marking a sale refunded here didn't move any money or stop the customer's plan."}, 410
 
 
 class MerchantExportTransactionsResource(Resource):
@@ -527,9 +493,9 @@ class MerchantExportTransactionsResource(Resource):
                 t.product_name,
                 t.quantity,
                 t.amount,
-                getattr(t, 'commission_rate', 10),
-                getattr(t, 'commission_amount', 0),
-                getattr(t, 'payout_amount', 0),
+                merchant_fees.transaction_fields(t)['commission_rate'],
+                merchant_fees.transaction_fields(t)['commission_amount'],
+                merchant_fees.transaction_fields(t)['payout_amount'],
                 t.status,
                 t.payment_status,
                 t.payment_method,

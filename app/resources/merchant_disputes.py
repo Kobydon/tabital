@@ -181,17 +181,27 @@ class MerchantUpdateDisputeResource(Resource):
         if not dispute or dispute.merchant_id != current_merchant.id:
             return {"error": "Dispute not found"}, 404
         
-        data = request.get_json()
-        
+        data = request.get_json() or {}
+
+        # Merchants add their side of the story; only Tabital resolves a dispute
+        # (PUT /admin/disputes/<id>/resolve), which unpauses or cancels the plan through the ledger.
+        if 'status' in data:
+            return {"error": "Only Tabital can resolve a dispute. Add your response, or escalate it."}, 400
         if 'merchant_notes' in data:
-            dispute.merchant_notes = data['merchant_notes']
-        
-        if 'status' in data and data['status'] in ['under_review', 'resolved']:
-            dispute.status = data['status']
-        
+            dispute.merchant_notes = (data['merchant_notes'] or '')[:2000]
+
         db.session.commit()
-        
-        return {"message": "Dispute updated successfully"}, 200
+
+        return {"message": "Your response has been added"}, 200
+
+
+def _merchant_response(dispute, text):
+    """Record a merchant's response for the admin who resolves the dispute. Never resolves it."""
+    stamp = datetime.utcnow().strftime('%Y-%m-%d %H:%M')
+    note = f"[{stamp}] {text}"
+    dispute.merchant_notes = f"{dispute.merchant_notes}\n{note}" if dispute.merchant_notes else note
+    if dispute.status not in ('resolved', 'closed', 'escalated'):
+        dispute.status = 'under_review'
 
 
 class MerchantAcceptDisputeResource(Resource):
@@ -208,25 +218,18 @@ class MerchantAcceptDisputeResource(Resource):
         if not dispute or dispute.merchant_id != current_merchant.id:
             return {"error": "Dispute not found"}, 404
         
-        data = request.get_json()
-        refund_amount = data.get('refund_amount', dispute.amount)
-        notes = data.get('notes', '')
-        
-        dispute.status = 'resolved'
-        dispute.resolution = 'refunded'
-        dispute.refund_amount = refund_amount
-        dispute.resolution_notes = notes
-        dispute.resolved_at = datetime.utcnow()
-        dispute.resolved_by = current_merchant.id
-        
-        # Update transaction status if needed
-        if dispute.transaction:
-            dispute.transaction.status = 'refunded'
-            dispute.transaction.payment_status = 'refunded'
-        
+        if dispute.status in ('resolved', 'closed'):
+            return {"error": "This dispute is already closed"}, 400
+        data = request.get_json() or {}
+        notes = (data.get('notes') or '').strip()[:1000]
+
+        # The merchant agrees with the customer. Tabital resolves it for the customer
+        # (plan cancelled, balance written off, sale clawed back from settlements).
+        _merchant_response(dispute, f"Merchant accepts the customer's claim. {notes}".strip())
         db.session.commit()
-        
-        return {"message": f"Refund of {refund_amount} processed successfully"}, 200
+
+        return {"message": "Thanks. Tabital will close the dispute in the customer's favour; the sale is then "
+                           "taken off your settlements."}, 200
 
 
 class MerchantRejectDisputeResource(Resource):
@@ -243,18 +246,18 @@ class MerchantRejectDisputeResource(Resource):
         if not dispute or dispute.merchant_id != current_merchant.id:
             return {"error": "Dispute not found"}, 404
         
-        data = request.get_json()
-        reason = data.get('reason', '')
-        
-        dispute.status = 'resolved'
-        dispute.resolution = 'rejected'
-        dispute.resolution_notes = reason
-        dispute.resolved_at = datetime.utcnow()
-        dispute.resolved_by = current_merchant.id
-        
+        if dispute.status in ('resolved', 'closed'):
+            return {"error": "This dispute is already closed"}, 400
+        data = request.get_json() or {}
+        reason = (data.get('reason') or '').strip()[:1000]
+        if len(reason) < 5:
+            return {"error": "Say why you disagree (at least 5 characters)"}, 400
+
+        # The merchant contests it; Tabital reviews both sides and resolves it
+        _merchant_response(dispute, f"Merchant disputes the claim: {reason}")
         db.session.commit()
-        
-        return {"message": "Dispute rejected successfully"}, 200
+
+        return {"message": "Your response has been sent to Tabital, who will review it and decide."}, 200
 
 
 class MerchantEscalateDisputeResource(Resource):
@@ -271,12 +274,15 @@ class MerchantEscalateDisputeResource(Resource):
         if not dispute or dispute.merchant_id != current_merchant.id:
             return {"error": "Dispute not found"}, 404
         
-        data = request.get_json()
-        notes = data.get('notes', '')
-        
+        if dispute.status in ('resolved', 'closed'):
+            return {"error": "This dispute is already closed"}, 400
+        data = request.get_json() or {}
+        notes = (data.get('notes') or '').strip()[:1000]
+
+        _merchant_response(dispute, f"Escalated by merchant. {notes}".strip())
         dispute.status = 'escalated'
-        dispute.merchant_notes = notes
-        dispute.admin_notes = f"Escalated by merchant: {notes}"
+        dispute.admin_notes = f"{dispute.admin_notes}\nEscalated by merchant: {notes}" if dispute.admin_notes \
+            else f"Escalated by merchant: {notes}"
         
         db.session.commit()
         

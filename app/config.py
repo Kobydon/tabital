@@ -33,10 +33,16 @@ class Config:
 
     # Token lifetimes for flask_praetorian
     JWT_ACCESS_LIFESPAN = {"minutes": int(os.getenv("JWT_ACCESS_MINUTES", "60"))}
-    # Password guessing (services/auth_service.py login_user)
-    LOGIN_MAX_FAILURES = int(os.getenv("LOGIN_MAX_FAILURES", "5"))              # per phone/email
-    LOGIN_MAX_FAILURES_PER_IP = int(os.getenv("LOGIN_MAX_FAILURES_PER_IP", "30"))
+    # Guessing limits (services/attempts.py)
+    LOGIN_MAX_FAILURES = int(os.getenv("LOGIN_MAX_FAILURES", "5"))              # per account per window
+    LOGIN_MAX_ACCOUNTS_PER_IP = int(os.getenv("LOGIN_MAX_ACCOUNTS_PER_IP", "20"))   # spraying from one address
     LOGIN_WINDOW_MINUTES = int(os.getenv("LOGIN_WINDOW_MINUTES", "15"))
+    OTP_MAX_FAILURES_PER_DAY = int(os.getenv("OTP_MAX_FAILURES_PER_DAY", "10"))     # reset codes, per account
+    OTP_MAX_ACCOUNTS_PER_IP = int(os.getenv("OTP_MAX_ACCOUNTS_PER_IP", "10"))
+    SIGNUP_MAX_FAILURES_PER_IP = int(os.getenv("SIGNUP_MAX_FAILURES_PER_IP", "10"))  # per window
+    # X-Forwarded-For hops added by our own proxies. Render: 1. Set 0 if nothing sits in front of the
+    # app, or clients could pick their own IP address.
+    TRUSTED_PROXY_COUNT = int(os.getenv("TRUSTED_PROXY_COUNT", "1"))
     JWT_REFRESH_LIFESPAN = {"days": int(os.getenv("JWT_REFRESH_DAYS", "7"))}
 
     # Paystack (CLAUDE.md §13.1 D11). Use sk_test_/pk_test_ keys until go-live.

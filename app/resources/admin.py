@@ -1,4 +1,5 @@
 from ..services import pii
+from ..services import merchant_fees
 from flask import json
 from flask_restful import Resource, request
 from flask_praetorian import auth_required, current_user
@@ -92,6 +93,41 @@ class GetCustomersResource(Resource):
         } for u in users]
 
 
+
+IDENTITY_FIELDS = ('national_id', 'phone', 'momo_number', 'business_phone')
+
+
+def _apply_fields(user, data, allowed):
+    """Set the allowed fields; never save a masked value. Returns True if an identity field changed."""
+    changed = False
+    for field in allowed:
+        if field in data and data[field] is not None and not pii.is_masked(data[field]):
+            if field in IDENTITY_FIELDS and getattr(user, field) != data[field]:
+                changed = True
+            setattr(user, field, data[field])
+    return changed
+
+
+def _recheck_identity(user, changed):
+    """A new Ghana Card or phone number gets the same duplicate checks as sign-up (§9A, §9D)."""
+    if not changed:
+        return
+    from ..services import fraud
+    try:
+        fraud.check_duplicates(user)
+        db.session.commit()
+    except Exception:                      # noqa: BLE001 (logged; the edit itself is saved)
+        db.session.rollback()
+        from flask import current_app
+        current_app.logger.exception("Fraud checks failed after an admin edit")
+
+
+def _deactivate(user):
+    """Accounts are never deleted: money, KYC, fraud and audit records must stay. Suspending stops
+    sign-in and new purchases; plans and settlements carry on."""
+    user.status = 'suspended'
+    db.session.commit()
+
 class CustomerResource(Resource):
     @auth_required
     def get(self, customer_id):
@@ -119,12 +155,14 @@ class CustomerResource(Resource):
         if not user or user.role != "customer":
             return {"error": "Customer not found"}, 404
         data = request.get_json()
-        allowed = ['full_name', 'business_name', 'phone', 'city', 'address', 'status',
+        # Status changes go through the approval / status endpoints (with a reason), not an edit
+        if 'status' in data:
+            return {"error": "Change the status with the approve / status actions, not an edit."}, 400
+        allowed = ['full_name', 'business_name', 'phone', 'city', 'address',
                    'payment_plan', 'income_range', 'national_id', 'gps', 'ref_name', 'ref_phone', 'ref_relationship']
-        for field in allowed:
-            if field in data and data[field] is not None and not pii.is_masked(data[field]):  # never save a masked value
-                setattr(user, field, data[field])
+        identity_changed = _apply_fields(user, data, allowed)
         db.session.commit()
+        _recheck_identity(user, identity_changed)
         return {"message": "Customer updated successfully"}
 
     @auth_required
@@ -135,9 +173,8 @@ class CustomerResource(Resource):
         if not user or user.role != "customer":
             return {"error": "Customer not found"}, 404
         name = user.full_name or user.business_name or user.phone
-        db.session.delete(user)
-        db.session.commit()
-        return {"message": f"Customer {name} deleted successfully"}
+        _deactivate(user)
+        return {"message": f"Customer {name} deactivated. Their records are kept.", "status": user.status}
 
 
 class GetMerchantsResource(Resource):
@@ -204,7 +241,8 @@ class MerchantResource(Resource):
             "kyc_status": safe_str(getattr(m, 'kyc_status', '')),
             "verification_level": safe_str(getattr(m, 'verification_level', '')),
             "aml_screening": safe_str(getattr(m, 'aml_screening', '')),
-            "commission_rate": safe_float(getattr(m, 'commission_rate', 2.5)),
+            "commission_rate": merchant_fees.describe(m)["fee_percentage"],   # fee tier (§6.1)
+            **merchant_fees.describe(m),
             "pending_payout": safe_float(getattr(m, 'pending_payout', 0)),
             "next_settlement": safe_str(getattr(m, 'next_settlement', ''))
         }
@@ -219,20 +257,25 @@ class MerchantResource(Resource):
         from .merchant_payouts import PAYOUT_FIELDS, PayoutError, apply_payout_details
 
         data = request.get_json() or {}
-        allowed = ['full_name', 'business_name', 'owner_name', 'phone', 'city', 'address', 'status',
+        # Status and verification go through KYB approval; sales figures come from the records
+        refused = [f for f in ('status', 'verified', 'total_sales', 'total_products', 'rating') if f in data]
+        if refused:
+            return {"error": f"These can't be edited here: {', '.join(refused)}. Use KYB approval / the status "
+                             "action; sales figures come from the records."}, 400
+        allowed = ['full_name', 'business_name', 'owner_name', 'phone', 'city', 'address',
                    'payment_plan', 'income_range', 'national_id', 'gps', 'product_type', 'has_shop',
                    'shop_url', 'years_in_business', 'offers_credit', 'price_range', 'payment_method',
                    'business_type', 'registration_number', 'tax_id', 'business_address', 'business_phone',
-                   'business_email', 'website', 'description', 'total_products', 'total_sales', 'rating', 'verified']
-        for field in allowed:
-            if field in data and data[field] is not None and not pii.is_masked(data[field]):  # never save a masked value
-                setattr(m, field, data[field])
+                   'business_email', 'website', 'description']
+        identity_changed = _apply_fields(m, data, allowed)
         try:
             apply_payout_details(m, {k: data[k] for k in PAYOUT_FIELDS if k in data and data[k] is not None},
                                  by_admin=True)
         except PayoutError as e:
+            db.session.rollback()
             return {"error": str(e)}, 400
         db.session.commit()
+        _recheck_identity(m, identity_changed)
         return {"message": "Merchant updated successfully"}
 
     @auth_required
@@ -243,9 +286,8 @@ class MerchantResource(Resource):
         if not m or m.role != "merchant":
             return {"error": "Merchant not found"}, 404
         name = m.business_name or m.owner_name or m.phone
-        db.session.delete(m)
-        db.session.commit()
-        return {"message": f"Merchant {name} deleted successfully"}
+        _deactivate(m)
+        return {"message": f"Merchant {name} deactivated. Their records are kept.", "status": m.status}
 
 
 class MerchantStatsResource(Resource):
@@ -369,7 +411,9 @@ class BulkUpdateCustomersResource(Resource):
         data = request.get_json()
         customer_ids = data.get('ids', [])
         update_data = data.get('data', {})
-        allowed_fields = ['status', 'payment_plan', 'income_range']
+        if 'status' in update_data:
+            return {"error": "Change statuses one at a time with the status action (it needs a reason)."}, 400
+        allowed_fields = ['payment_plan', 'income_range']
         updated_count = 0
         for customer_id in customer_ids:
             user = User.query.get(customer_id)
@@ -492,7 +536,7 @@ class GetCurrentUserResource(Resource):
             "kyc_status": safe_str(user.kyc_status),
             "verification_level": safe_str(user.verification_level),
 
-            "commission_rate": safe_float(user.commission_rate),
+            "commission_rate": merchant_fees.describe(user)["fee_percentage"] if user.role == "merchant" else None,
             "pending_payout": safe_float(user.pending_payout),
 
             "total_products": safe_int(user.total_products),

@@ -127,7 +127,8 @@ class AdminGetOverduePaymentsResource(Resource):
                 "installment_number": payment.installment_number,
                 "amount": float(payment.amount),
                 "late_fee": float(payment.late_fee),
-                "total_due": float(payment.amount + payment.late_fee),
+                "total_due": payment.get_total_due(),          # still owed, after part payments
+                "part_paid": float(payment.part_paid()),
                 "due_date": payment.due_date.isoformat() if payment.due_date else None,
                 "days_overdue": days_overdue,
                 "overdue_range": overdue_range_display,
@@ -196,7 +197,8 @@ class AdminGetOverduePaymentDetailResource(Resource):
                 "amount": float(p.amount),
                 "status": p.status,
                 "paid_date": p.paid_date.isoformat() if p.paid_date else None,
-                "late_fee": float(p.late_fee)
+                "late_fee": float(p.late_fee),
+                "part_paid": float(p.part_paid())
             })
         
         # Timeline of what actually happened: late fees charged and messages actually sent
@@ -225,7 +227,9 @@ class AdminGetOverduePaymentDetailResource(Resource):
                 "installment_number": payment.installment_number,
                 "amount": float(payment.amount),
                 "late_fee": float(payment.late_fee),
-                "total_due": float(payment.amount + payment.late_fee),
+                "total_due": payment.get_total_due(),          # still owed, after part payments
+                "part_paid": float(payment.part_paid()),
+                "part_payments": [p.to_dict() for p in payment.part_payments()],
                 "due_date": payment.due_date.isoformat() if payment.due_date else None,
                 "days_overdue": days_overdue,
                 "status": payment.status,
@@ -320,38 +324,35 @@ class AdminMarkPaymentReceivedResource(Resource):
         if current_admin.role != 'admin':
             return {"error": "Unauthorized"}, 403
         
-        from app.services.payments import mark_instalment_paid
+        from app.services import payments
 
         data = request.get_json() or {}
-        amount_received = float(data.get('amount_received') or 0)
-        payment_method = data.get('payment_method') or 'manual'
-        payment_reference = (data.get('payment_reference') or '').strip()
+        payment_method = (data.get('payment_method') or 'manual').strip()[:50]
+        if payment_method not in ('mobile_money', 'bank_transfer', 'cash', 'card', 'manual'):
+            return {"error": "Unknown payment method"}, 400
 
         payment = InstalmentPayment.query.get(payment_id)
         if not payment:
             return {"error": "Payment not found"}, 404
 
-        if payment.status == 'paid':
-            return {"error": "Payment already marked as paid"}, 400
-
-        payment_reference = payment_reference or payment.payment_reference
-        if not payment_reference:
-            return {"error": "Enter the MoMo/bank reference of the money received"}, 400
-
-        total_due = payment.get_total_due()
-        if amount_received and amount_received + 0.005 < total_due:
-            # Partial payments need the ledger (Phase 1); don't mark a short payment as paid
-            return {"error": f"Amount received is less than the {total_due:.2f} due"}, 400
-
-        mark_instalment_paid(payment, payment_method, payment_reference, amount_received or None,
-                             user=current_admin)
+        # Less than what's owed is a part payment (services/payments.record_payment)
+        try:
+            outcome = payments.record_payment(payment, data.get('amount_received'), payment_method,
+                                              data.get('payment_reference'), user=current_admin)
+        except payments.PaymentError as e:
+            db.session.rollback()
+            return {"error": str(e)}, 400
         db.session.commit()
-        
+
+        still_owed = payment.get_total_due()
         return {
-            "message": "Payment marked as received",
+            "message": "Payment recorded" if outcome == 'paid'
+                       else f"Part payment recorded. {still_owed:.2f} is still owed on this instalment.",
             "payment_id": payment.payment_id,
-            "status": "paid",
-            "amount_received": amount_received if amount_received > 0 else payment.amount
+            "status": payment.status,
+            "outcome": outcome,
+            "still_owed": still_owed,
+            "part_payments": [p.to_dict() for p in payment.part_payments()],
         }, 200
 
 
@@ -414,7 +415,7 @@ class AdminExportOverduePaymentsResource(Resource):
                 payment.installment_number,
                 payment.amount,
                 payment.late_fee,
-                payment.amount + payment.late_fee,
+                payment.get_total_due(),
                 payment.due_date.strftime("%Y-%m-%d") if payment.due_date else "",
                 days_overdue,
                 payment.status

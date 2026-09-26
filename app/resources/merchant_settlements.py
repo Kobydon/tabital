@@ -1,4 +1,5 @@
 from flask_restful import Resource, request
+from ..services import merchant_fees
 from flask_praetorian import auth_required, current_user
 from ..models.user import User
 from ..models.transaction import Transaction
@@ -62,7 +63,7 @@ class MerchantGetSettlementsResource(Resource):
                         "status": "pending"
                     }
                 
-                commission = t.amount * (current_merchant.commission_rate / 100)
+                commission = merchant_fees.transaction_split(t, current_merchant)[0]   # fee fixed on the sale
                 net = t.amount - commission
                 
                 settlements[week_key]["transactions"].append({
@@ -124,7 +125,7 @@ class MerchantGetSettlementSummaryResource(Resource):
         
         # Calculate pending amount
         pending_amount = sum(t.amount for t in pending_transactions)
-        pending_commission = pending_amount * (current_merchant.commission_rate / 100)
+        pending_commission = sum(merchant_fees.transaction_split(t, current_merchant)[0] for t in pending_transactions)
         pending_net = pending_amount - pending_commission
         
         # Get last settlement
@@ -153,7 +154,7 @@ class MerchantGetSettlementSummaryResource(Resource):
             ).all()
             
             total = sum(t.amount for t in monthly_transactions)
-            commission = total * (current_merchant.commission_rate / 100)
+            commission = sum(merchant_fees.transaction_split(t, current_merchant)[0] for t in monthly_transactions)
             net = total - commission
             
             monthly_breakdown.append({
@@ -169,7 +170,7 @@ class MerchantGetSettlementSummaryResource(Resource):
             "pending_commission": pending_commission,
             "pending_net": pending_net,
             "pending_transactions": len(pending_transactions),
-            "commission_rate": current_merchant.commission_rate,
+            "commission_rate": merchant_fees.describe(current_merchant)["fee_percentage"],   # current tier (§6.1)
             "last_settlement": last_settlement_date,
             "next_settlement_estimate": (datetime.utcnow() + timedelta(days=7)).strftime('%d %b %Y'),
             "monthly_breakdown": monthly_breakdown,
@@ -243,7 +244,7 @@ class MerchantGetSettlementDetailsResource(Resource):
         ).all()
         
         total_amount = sum(t.amount for t in transactions)
-        commission = total_amount * (current_merchant.commission_rate / 100)
+        commission = sum(merchant_fees.transaction_split(t, current_merchant)[0] for t in transactions)
         net_amount = total_amount - commission
         
         return {
@@ -252,7 +253,7 @@ class MerchantGetSettlementDetailsResource(Resource):
             "start_date": start_date.strftime('%Y-%m-%d'),
             "end_date": end_date.strftime('%Y-%m-%d'),
             "total_amount": total_amount,
-            "commission_rate": current_merchant.commission_rate,
+            "commission_rate": merchant_fees.describe(current_merchant)["fee_percentage"],   # current tier (§6.1)
             "commission": commission,
             "net_amount": net_amount,
             "transaction_count": len(transactions),

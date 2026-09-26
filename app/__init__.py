@@ -15,6 +15,7 @@ from .models import identity as _identity_model  # noqa: F401
 from .models import deferment as _deferment_model  # noqa: F401
 from .models import pii_access as _pii_access_model  # noqa: F401
 from .models import login_attempt as _login_attempt_model  # noqa: F401
+from .models import part_payment as _part_payment_model  # noqa: F401
 from .routes import register_routes
 
 
@@ -160,18 +161,34 @@ def register_commands(app):
         from .models.instalment_payment import InstalmentPayment
         from .services import ledger
 
+        from .models.ledger import LedgerEntry
+        from .models.transaction import Transaction
+
         created = 0
         for plan in InstalmentPlan.query.order_by(InstalmentPlan.id).all():
             if ledger.has_entries(plan):
                 continue
-            ledger.record(plan, "plan_opened", plan.total_amount, note="Backfill: contract total payable")
+            # Entries are dated when things happened, so reports put them in the right month
+            opened = plan.created_at
+            ledger.record(plan, "plan_opened", plan.total_amount, note="Backfill: contract total payable", at=opened)
+            # Merchant side, from the payout stored on the sale when it was approved
+            sale = Transaction.query.get(plan.transaction_id) if plan.transaction_id else None
+            if sale is not None and sale.payout_amount is not None:
+                fee = Decimal(str(sale.amount or 0)) - Decimal(str(sale.payout_amount))
+                ledger.record(plan, LedgerEntry.MERCHANT_FEE, fee, account=LedgerEntry.MERCHANT,
+                              note="Backfill: merchant discount (MDR)", at=opened)
+                ledger.record(plan, LedgerEntry.MERCHANT_PAYABLE, sale.payout_amount, account=LedgerEntry.MERCHANT,
+                              note="Backfill: settlement owed to merchant", at=opened)
             payments = InstalmentPayment.query.filter_by(plan_id=plan.id).all()
             for p in payments:
                 if p.late_fee and (p.late_fee_paid or p.status != 'paid'):
-                    ledger.late_fee_charged(plan, p, p.late_fee)
+                    ledger.record(plan, LedgerEntry.LATE_FEE_CHARGED, p.late_fee, payment=p,
+                                  note="Backfill: late fee", at=p.late_fee_applied_date or p.due_date)
                 if p.status == 'paid':
                     paid = p.paid_amount or (Decimal(str(p.amount)) + Decimal(str(p.late_fee or 0)))
-                    ledger.payment_received(plan, p, paid, p.payment_reference or "backfill")
+                    ledger.record(plan, LedgerEntry.PAYMENT_RECEIVED, -Decimal(str(paid)), payment=p,
+                                  reference=p.payment_reference or "backfill",
+                                  note=f"Backfill: payment {p.installment_number}", at=p.paid_date or p.due_date)
             created += 1
         if dry_run:
             db.session.rollback()

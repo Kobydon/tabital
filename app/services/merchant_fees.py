@@ -67,6 +67,14 @@ def transaction_split(transaction, merchant=None):
     return float(amount - payout), float(payout)
 
 
+def transaction_fields(transaction, merchant=None) -> dict:
+    """commission_rate (%), commission_amount and payout_amount of a sale, for API responses."""
+    fee, payout = transaction_split(transaction, merchant)
+    amount = float(transaction.amount or 0)
+    return {"commission_rate": round(fee / amount * 100, 2) if amount else 0.0,
+            "commission_amount": fee, "payout_amount": payout}
+
+
 def apply_at_approval(merchant, data, admin):
     """Optional tier chosen while approving a merchant: data['fee_tier'] (+ optional 'fee_tier_reason').
     No tier given leaves the merchant as they are (standard unless set before). Doesn't commit."""

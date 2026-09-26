@@ -186,4 +186,6 @@ def test_otp_attempts_are_limited(client):
     db.session.commit()
     for _ in range(5):
         assert client.post("/api/verify-otp", json={"email": "kofi@example.com", "otp": "000000"}).status_code == 401
-    assert client.post("/api/verify-otp", json={"email": "kofi@example.com", "otp": "123456"}).status_code == 429
+    # The 6th try uses the code up, even with the right digits (same generic answer)
+    assert client.post("/api/verify-otp", json={"email": "kofi@example.com", "otp": "123456"}).status_code == 401
+    assert User.query.filter_by(business_email="kofi@example.com").one().reset_otp is None

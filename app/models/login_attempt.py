@@ -1,4 +1,4 @@
-"""Every login attempt: used to slow down password guessing (services/auth_service.py) and for audit."""
+"""Sign-in, reset-code and sign-up attempts: used to slow down guessing (services/attempts.py) and for audit."""
 from datetime import datetime
 
 from ..extensions import db
@@ -7,8 +7,13 @@ from ..extensions import db
 class LoginAttempt(db.Model):
     __tablename__ = 'login_attempts'
 
+    LOGIN, OTP, SIGNUP = 'login', 'otp', 'signup'
+
     id = db.Column(db.Integer, primary_key=True)
-    identifier = db.Column(db.String(120), nullable=False, index=True)   # phone or email as typed (normalised)
+    kind = db.Column(db.String(10), nullable=False, default=LOGIN, index=True)
+    # Whose attempt: "user:<id>" when the account exists, else "id:<phone/email as typed>" (or "ip:<ip>")
+    subject = db.Column(db.String(140), nullable=False, index=True)
+    identifier = db.Column(db.String(120), nullable=False)       # what was typed (normalised)
     ip = db.Column(db.String(64), index=True)
     success = db.Column(db.Boolean, nullable=False, default=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)

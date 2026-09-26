@@ -1,4 +1,5 @@
 from flask_restful import Resource, request
+from ..services import merchant_fees
 from flask_praetorian import auth_required, current_user
 from ..models.user import User
 from ..models.transaction import Transaction
@@ -442,7 +443,7 @@ class MerchantFinancialReportResource(Resource):
             
             total_sales = sum(t.amount for t in sales_transactions)
             total_transactions = len(sales_transactions)
-            commission = total_sales * (current_merchant.commission_rate / 100)
+            commission = sum(merchant_fees.transaction_split(t, current_merchant)[0] for t in sales_transactions)
             net_income = total_sales - commission
             
             # Refunds
@@ -475,7 +476,7 @@ class MerchantFinancialReportResource(Resource):
         ).all()
         
         ytd_total = sum(t.amount for t in ytd_transactions)
-        ytd_commission = ytd_total * (current_merchant.commission_rate / 100)
+        ytd_commission = sum(merchant_fees.transaction_split(t, current_merchant)[0] for t in ytd_transactions)
         ytd_net = ytd_total - ytd_commission
         
         # Projected annual
@@ -494,7 +495,7 @@ class MerchantFinancialReportResource(Resource):
                 "projected_annual": safe_float(projected_annual)
             },
             "monthly_breakdown": monthly_data,
-            "commission_rate": current_merchant.commission_rate
+            "commission_rate": merchant_fees.describe(current_merchant)["fee_percentage"]   # current tier (§6.1)
         }
 
 

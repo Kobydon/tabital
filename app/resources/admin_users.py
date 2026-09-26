@@ -1,4 +1,5 @@
 from flask_restful import Resource, request
+from ..services import merchant_fees
 from flask_praetorian import auth_required, current_user
 from app.models.user import User
 from app.models.instalment import InstalmentPlan
@@ -207,7 +208,7 @@ class AdminGetUserDetailResource(Resource):
                 "total_products": user.total_products,
                 "total_sales": user.total_sales,
                 "rating": user.rating,
-                "commission_rate": user.commission_rate,
+                "commission_rate": merchant_fees.describe(user)["fee_percentage"] if user.role == "merchant" else None,
                 "pending_payout": user.pending_payout
             })
         

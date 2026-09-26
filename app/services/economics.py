@@ -146,10 +146,16 @@ def _range(start: date, end: date):
 
 def revenue_between(start: datetime, end: datetime = None):
     """Revenue recognised in the ledger in [start, end): merchant fees (MDR) on plans opened, late fees
-    net of waivers, and deferment fees. The one definition of revenue for the admin reports."""
+    net of waivers, and deferment fees. The one definition of revenue for the admin reports.
+
+    Same basis as summary(): cancelled plans (a sale reversed, e.g. a dispute won by the customer and
+    clawed back from the merchant) earn no merchant fee."""
     end = end or datetime.utcnow() + timedelta(days=1)
-    merchant_fees = ledger.to_cedis(db.session.query(ledger._merchant_fee_expr())
-                                    .filter(LedgerEntry.created_at >= start, LedgerEntry.created_at < end).scalar())
+    merchant_fees = ledger.to_cedis(
+        db.session.query(ledger._merchant_fee_expr())
+        .join(InstalmentPlan, InstalmentPlan.id == LedgerEntry.plan_id)
+        .filter(LedgerEntry.created_at >= start, LedgerEntry.created_at < end,
+                InstalmentPlan.status != 'cancelled').scalar())
     late_fees = _sum_entries([LedgerEntry.LATE_FEE_CHARGED, LedgerEntry.LATE_FEE_WAIVED], start, end)
     deferment_fees = _sum_entries([LedgerEntry.DEFERMENT_FEE], start, end)
     plans = InstalmentPlan.query.filter(InstalmentPlan.created_at >= start, InstalmentPlan.created_at < end,

@@ -46,14 +46,38 @@ class InstalmentPayment(db.Model):
     
 
     def _fee_amount(self, today, pct_key, default_pct):
-        """A fee of pct of the instalment amount, limited by what's left under the plan's cap."""
+        """A fee of pct of the overdue part of the instalment (LF = O x LR, §5.2), limited by what's
+        left under the plan's cap. Part payments go to the instalment first, so they lower O."""
         from decimal import Decimal, ROUND_HALF_UP
         from .system_settings import SystemSetting
         from ..services import ledger
 
         pct = Decimal(str(SystemSetting.get_value(pct_key, default_pct)))
-        fee = (Decimal(str(self.amount)) * pct / 100).quantize(Decimal("0.01"), ROUND_HALF_UP)
+        overdue = max(Decimal("0"), Decimal(str(self.amount)).quantize(Decimal("0.01")) - self.part_paid())
+        fee = (overdue * pct / 100).quantize(Decimal("0.01"), ROUND_HALF_UP)
         return min(fee, ledger.late_fee_cap_remaining(self.plan))
+
+    def part_payments(self):
+        from .part_payment import InstalmentPartPayment
+        if self.id is None:
+            return []
+        return InstalmentPartPayment.query.filter_by(payment_id=self.id).order_by(InstalmentPartPayment.id).all()
+
+    def part_paid(self):
+        """Money already received towards this instalment by part payments (Decimal GHS)."""
+        from decimal import Decimal
+        from .part_payment import InstalmentPartPayment
+        if self.id is None:
+            return Decimal("0.00")
+        pesewas = db.session.query(db.func.coalesce(db.func.sum(InstalmentPartPayment.amount_pesewas), 0))\
+            .filter(InstalmentPartPayment.payment_id == self.id).scalar()
+        return (Decimal(int(pesewas)) / 100).quantize(Decimal("0.01"))
+
+    def gross_due(self):
+        """Instalment + unpaid late fees, before any part payments (Decimal GHS)."""
+        from decimal import Decimal
+        fee = Decimal(str(self.late_fee or 0)) if not self.late_fee_paid else Decimal("0")
+        return (Decimal(str(self.amount)) + fee).quantize(Decimal("0.01"))
 
     def apply_late_fee(self, today=None, commit=True):
         """
@@ -115,5 +139,11 @@ class InstalmentPayment(db.Model):
         return True
 
     def get_total_due(self):
-        """Get total amount due including late fee"""
-        return self.amount + (self.late_fee if not self.late_fee_paid else 0)
+        """What's still owed on this instalment: amount + unpaid late fees - money received.
+        For a paid instalment that's any late fee charged after the customer started paying
+        (paid_amount holds everything received, part payments included)."""
+        from decimal import Decimal
+        if self.status == 'paid':
+            received = Decimal(str(self.paid_amount or 0))
+            return float(max(Decimal("0.00"), self.gross_due() - received))
+        return float(max(Decimal("0.00"), self.gross_due() - self.part_paid()))
