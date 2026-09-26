@@ -312,7 +312,7 @@ def test_payment_link_flow(env):
     view = env["client"].get(f"/customer/payment-links/{link['token']}", headers=env["customer_headers"])
     assert view.status_code == 200 and view.get_json()["product"]["id"] == product.id
 
-    buy = env["client"].post("/customer/purchase", headers=env["customer_headers"], json={
+    buy = env["client"].post("/customer/purchase", headers=env["customer_headers"], json={"accept_terms": True, 
         "payment_link": link["token"], "product_id": 999, "quantity": 5, "number_of_installments": 4})
     assert buy.status_code == 201, buy.get_json()
     order = PurchaseOrder.query.order_by(PurchaseOrder.id.desc()).first()
@@ -320,7 +320,7 @@ def test_payment_link_flow(env):
     assert order.delivery_address == "Collected in store" and order.payment_link_id == link["id"]
     assert buy.get_json()["payment_schedule"][0]["delivery_fee"] == 0                # collected in store
 
-    again = env["client"].post("/customer/purchase", headers=env["customer_headers"], json={
+    again = env["client"].post("/customer/purchase", headers=env["customer_headers"], json={"accept_terms": True, 
         "payment_link": link["token"], "number_of_installments": 4})
     assert again.status_code == 410                                                 # one use
 

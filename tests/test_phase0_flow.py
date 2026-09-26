@@ -84,7 +84,7 @@ def test_purchase_is_priced_by_server_and_payment_needs_verification(client):
     a_token = login(client, admin.phone)
 
     # Client-supplied amounts are ignored
-    res = client.post("/customer/purchase", headers=auth(c_token), json={
+    res = client.post("/customer/purchase", headers=auth(c_token), json={"accept_terms": True, 
         "product_id": product.id, "quantity": 1, "number_of_installments": 4,
         "delivery_address": "12 Ring Road, Accra",
         "product_price": 1, "down_payment_amount": 1, "total_payable": 1,
@@ -143,7 +143,7 @@ def test_purchase_requires_verified_kyc(client):
                       price=5000, stock_quantity=1, status="active")
     db.session.add(product)
     db.session.commit()
-    res = client.post("/customer/purchase", headers=auth(login(client, customer.phone)), json={
+    res = client.post("/customer/purchase", headers=auth(login(client, customer.phone)), json={"accept_terms": True, 
         "product_id": product.id, "number_of_installments": 4, "delivery_address": "Kumasi"})
     assert res.status_code == 403
 

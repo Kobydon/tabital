@@ -47,7 +47,7 @@ def token(client, phone):
 
 
 def buy(env, customer, n=4, price_product=None):
-    return env["client"].post("/customer/purchase", headers=token(env["client"], customer.phone), json={
+    return env["client"].post("/customer/purchase", headers=token(env["client"], customer.phone), json={"accept_terms": True, 
         "product_id": (price_product or env["product"]).id, "number_of_installments": n,
         "delivery_address": "Kumasi"})
 

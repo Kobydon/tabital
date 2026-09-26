@@ -51,6 +51,9 @@ class PurchaseOrder(db.Model):
     payment_link_id = db.Column(db.Integer, db.ForeignKey('payment_links.id'), nullable=True)
     # The underwriting decision this order was accepted under
     risk_assessment_id = db.Column(db.Integer, db.ForeignKey('risk_assessments.id'), nullable=True)
+    # Consent (§10): which Terms the customer agreed to, and when
+    terms_version = db.Column(db.String(40))
+    terms_accepted_at = db.Column(db.DateTime)
     
     # Delivery
     delivery_address = db.Column(db.String(500))

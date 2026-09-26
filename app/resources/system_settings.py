@@ -125,8 +125,29 @@ class InstallmentCalculatorResource(Resource):
             },
             "payment_schedule": plan_engine.schedule_to_json(plan["schedule"]),
             # For customers: eligibility and available limit, so the Shop can warn before checkout
-            "credit": credit
+            "credit": credit,
+            # Key facts shown before the customer commits (§10, §12: rates come from settings, not UI copy)
+            "key_facts": _key_facts(late_fee_percentage),
         }, 200
+
+
+def _key_facts(late_fee_percentage):
+    from flask import current_app
+    g = SystemSetting.get_value
+    return {
+        "late_fee_percentage": late_fee_percentage,
+        "second_late_fee_percentage": float(g("second_late_fee_percentage", 10)),
+        "second_late_fee_after_days": int(g("second_late_fee_after_days", 31)),
+        "late_fee_cap_percentage": float(g("late_fee_cap_percentage", 25)),
+        "deferment_enabled": bool(g("deferment_enabled", True)),
+        "deferment_fee_percentage": float(g("deferment_fee_percentage", 10)),
+        "deferment_max_per_plan": int(g("deferment_max_per_plan", 1)),
+        "deferment_months": int(g("deferment_months", 1)),
+        "dispute_resolution_days": int(g("dispute_resolution_days", 21)),
+        "terms_url": current_app.config.get("TERMS_URL"),
+        "terms_version": current_app.config.get("TERMS_VERSION"),
+        "privacy_url": current_app.config.get("PRIVACY_POLICY_URL"),
+    }
 
 class LateFeeCalculatorResource(Resource):
     @auth_required

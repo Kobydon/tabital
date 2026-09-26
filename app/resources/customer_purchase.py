@@ -1,4 +1,5 @@
 # resources/customer_purchase.py
+from flask import current_app
 from flask_restful import Resource, request
 from flask_praetorian import auth_required, current_user
 from ..models.purchase_order import PurchaseOrder
@@ -38,6 +39,11 @@ class CustomerPurchaseResource(Resource):
         except (TypeError, ValueError):
             return {"error": "product_id, quantity and number_of_installments must be numbers"}, 400
         delivery_address = (data.get('delivery_address') or '').strip()
+
+        # Consent (§10): the customer must accept the current Terms, and we record which version
+        if data.get('accept_terms') is not True:
+            return {"error": "Please read and accept the Terms and Conditions to continue",
+                    "code": "terms_not_accepted"}, 400
 
         # In-store / WhatsApp sale through a merchant payment link: product and quantity come
         # from the link, and the link can only be used once
@@ -132,7 +138,9 @@ class CustomerPurchaseResource(Resource):
             # and the admin records the down payment reference (manual fallback).
             status='awaiting_payment' if paystack.is_configured() else 'pending',
             delivery_address=delivery_address,
-            risk_assessment_id=assessment.id
+            risk_assessment_id=assessment.id,
+            terms_version=current_app.config.get("TERMS_VERSION"),
+            terms_accepted_at=datetime.utcnow(),
         )
 
         db.session.add(order)

@@ -52,7 +52,7 @@ def approved_plan(app, down_payment_reference="MOMO-DP-1"):
                       price=4000, stock_quantity=3, status="active")
     db.session.add(product)
     db.session.commit()
-    assert client.post("/customer/purchase", headers=token(client, customer.phone), json={
+    assert client.post("/customer/purchase", headers=token(client, customer.phone), json={"accept_terms": True, 
         "product_id": product.id, "number_of_installments": 4,
         "delivery_address": "Osu, Accra"}).status_code == 201
     order_id = db.session.execute(db.text("select id from purchase_orders")).scalar()
@@ -153,3 +153,46 @@ def test_backfill_creates_entries_for_old_plans(app_ctx):
     # Running again doesn't duplicate anything
     runner.invoke(args=["ledger-backfill"])
     assert ledger.customer_balance(plan) == D("1680.00")
+
+
+def test_purchase_needs_terms_and_records_the_version(app_ctx):
+    """Consent (§10): no order without accepting the Terms; the order records which version."""
+    client, _, _ = approved_plan(app_ctx)
+    from app.models.purchase_order import PurchaseOrder
+    order = PurchaseOrder.query.one()
+    assert order.terms_version == app_ctx.config["TERMS_VERSION"] and order.terms_accepted_at is not None
+    customer = User.query.filter_by(role="customer").one()
+    product = Product.query.first()
+    res = client.post("/customer/purchase", headers=token(client, customer.phone), json={
+        "product_id": product.id, "number_of_installments": 1, "delivery_address": "Osu, Accra"})
+    assert res.status_code == 400 and res.get_json()["code"] == "terms_not_accepted"
+
+
+def test_quote_includes_key_facts_from_settings(app_ctx):
+    client, admin_h, _ = approved_plan(app_ctx)
+    customer = User.query.filter_by(role="customer").one()
+    q = client.post("/installment/calculate", headers=token(client, customer.phone),
+                    json={"product_price": 4000, "number_of_installments": 4}).get_json()
+    kf = q["key_facts"]
+    assert kf["late_fee_percentage"] == 10 and kf["late_fee_cap_percentage"] == 25
+    assert kf["deferment_fee_percentage"] == 10 and kf["deferment_max_per_plan"] == 1
+    assert kf["terms_url"].startswith("https://") and kf["terms_version"]
+
+
+def test_customer_sees_schedule_and_late_fee(app_ctx):
+    """The instalments screen gets each payment, and an unpaid late fee with the total now due."""
+    client, _, plan = approved_plan(app_ctx)
+    p2 = InstalmentPayment.query.filter_by(plan_id=plan.id, installment_number=2).one()
+    p2.due_date = datetime.utcnow() - timedelta(days=2)
+    db.session.commit()
+    p2.apply_late_fee()
+    customer = User.query.filter_by(role="customer").one()
+    h = token(client, customer.phone)
+    listed = client.get("/customer/instalments", headers=h).get_json()["plans"][0]["payment_schedule"]
+    assert [r["installment_number"] for r in listed] == [1, 2, 3, 4]
+    row = listed[1]
+    assert row["late_fee"] == 80 and row["amount_due"] == 880            # §5.3 late fee example
+    assert listed[0]["status"] == "paid" and listed[0]["amount_due"] == 0
+    detail = client.get(f"/customer/instalments/{plan.id}", headers=h)
+    if detail.status_code == 200:
+        assert detail.get_json()["payment_schedule"][1]["amount_due"] == 880

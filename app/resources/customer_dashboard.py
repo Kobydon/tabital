@@ -288,9 +288,10 @@ class CustomerInstalmentsResource(Resource):
                 InstalmentPayment.plan_id == plan.id,
                 InstalmentPayment.status.in_(['pending', 'overdue'])
             ).order_by(InstalmentPayment.due_date.asc()).first()
-            
+
             result.append({
                 "id": plan.id,
+                "payment_schedule": _schedule(plan),
                 "plan_id": safe_str(plan.plan_id),
                 "transaction_id": safe_str(plan.transaction_id),
                 "product_name": safe_str(plan.plan_name),
@@ -319,6 +320,30 @@ class CustomerInstalmentsResource(Resource):
         }
 
 
+def _schedule(plan, payments=None):
+    """A plan's payments for the customer, including any unpaid late fee and the total now due."""
+    if payments is None:
+        payments = InstalmentPayment.query.filter_by(plan_id=plan.id)\
+            .order_by(InstalmentPayment.installment_number).all()
+    rows = []
+    for p in payments:
+        unpaid_fee = safe_float(p.late_fee) if p.late_fee and not p.late_fee_paid and p.status != 'paid' else 0.0
+        rows.append({
+            "id": p.id,
+            "installment_number": p.installment_number,
+            "instalment_number": p.installment_number,      # older spelling, kept for existing screens
+            "due_date": p.due_date.isoformat() if p.due_date else "",
+            "original_due_date": p.original_due_date.isoformat() if p.original_due_date else None,
+            "amount": safe_float(p.amount),
+            "late_fee": unpaid_fee,
+            "amount_due": round(safe_float(p.amount) + unpaid_fee, 2) if p.status != 'paid' else 0.0,
+            "status": safe_str(p.status),
+            "paid_date": p.paid_date.isoformat() if p.paid_date else "",
+            "payment_reference": safe_str(p.payment_reference),
+        })
+    return rows
+
+
 class CustomerPlanDetailsResource(Resource):
     @auth_required
     def get(self, plan_id):
@@ -341,17 +366,7 @@ class CustomerPlanDetailsResource(Resource):
             plan_id=plan.id
         ).order_by(InstalmentPayment.installment_number).all()
         
-        payment_schedule = []
-        for payment in payments:
-            payment_schedule.append({
-                "id": payment.id,
-                "instalment_number": payment.installment_number,
-                "due_date": payment.due_date.isoformat() if payment.due_date else "",
-                "amount": safe_float(payment.amount),
-                "status": safe_str(payment.status),
-                "paid_date": payment.paid_date.isoformat() if payment.paid_date else "",
-                "payment_reference": safe_str(payment.payment_reference)
-            })
+        payment_schedule = _schedule(plan, payments)
         
         return {
             "id": plan.id,

@@ -252,7 +252,7 @@ def buyer(env, **extra):
 
 
 def buy(env, headers, n=4, qty=1):
-    return env["client"].post("/customer/purchase", headers=headers, json={
+    return env["client"].post("/customer/purchase", headers=headers, json={"accept_terms": True, 
         "product_id": env["product"].id, "number_of_installments": n, "quantity": qty,
         "delivery_address": "Osu, Accra"})
 

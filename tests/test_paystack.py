@@ -97,7 +97,7 @@ def signed(body: dict):
 
 
 def checkout(env):
-    res = env["client"].post("/customer/purchase", headers=env["customer"], json={
+    res = env["client"].post("/customer/purchase", headers=env["customer"], json={"accept_terms": True, 
         "product_id": env["product"].id, "number_of_installments": 4,
         "delivery_address": "Osu, Accra", "down_payment_amount": 1})
     assert res.status_code == 201, res.get_json()

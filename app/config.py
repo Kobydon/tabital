@@ -56,7 +56,10 @@ class Config:
     SMILEID_BASE_URL = os.getenv("SMILEID_BASE_URL", "https://testapi.smileidentity.com")
     # Public URL Smile ID posts results to (must be https in production)
     SMILEID_CALLBACK_URL = os.getenv("SMILEID_CALLBACK_URL")
-    PRIVACY_POLICY_URL = os.getenv("PRIVACY_POLICY_URL", "https://tabitalpay.com/")
+    # Legal documents (§10). Bump TERMS_VERSION whenever the Terms change; each order records it.
+    TERMS_URL = os.getenv("TERMS_URL", "https://tabitalpay.com/elementor-page-3332/")
+    TERMS_VERSION = os.getenv("TERMS_VERSION", "2026-09-26")
+    PRIVACY_POLICY_URL = os.getenv("PRIVACY_POLICY_URL", "https://tabitalpay.com/privacy-policy/")
 
     # Mail settings for password reset
     MAIL_SERVER = os.getenv("MAIL_SERVER", "smtp.gmail.com")
