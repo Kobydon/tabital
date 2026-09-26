@@ -39,6 +39,14 @@ class ApproveUserResource(Resource):
         user = User.query.get(user_id)
         if not user:
             return {"error": "User not found"}, 404
+        if user.role == "merchant":
+            # Optional merchant fee tier chosen by management at onboarding (§6.1)
+            from ..services import merchant_fees
+            try:
+                merchant_fees.apply_at_approval(user, request.get_json(silent=True) or {}, current_user())
+            except merchant_fees.FeeTierError as e:
+                db.session.rollback()
+                return {"error": str(e)}, 400
         user.status = "approved"
         if user.role == "customer" and not user.customer_id:
             user.customer_id = user.generate_customer_id()
@@ -341,9 +349,15 @@ class VerifyMerchantResource(Resource):
         m = User.query.get(merchant_id)
         if not m or m.role != "merchant":
             return {"error": "Merchant not found"}, 404
+        from ..services import merchant_fees
+        try:
+            merchant_fees.apply_at_approval(m, request.get_json(silent=True) or {}, current_user())
+        except merchant_fees.FeeTierError as e:
+            db.session.rollback()
+            return {"error": str(e)}, 400
         m.verified = True
         db.session.commit()
-        return {"message": "Merchant verified successfully"}
+        return {"message": "Merchant verified successfully", **merchant_fees.describe(m)}
 
 
 # Add these missing classes for bulk operations and search
@@ -578,8 +592,12 @@ class AdminApproveOrderResource(Resource):
 
         # MDR is charged on the product value P, not on delivery fee (§5.2: MS = P x (1 - MDR))
         product_value = plan_engine.money(order.product_price) * (order.quantity or 1)
-        mdr = plan_engine.rate(SystemSetting.get_value("merchant_fee_percentage", 10)) / 100
+        # The merchant's fee tier (§6.1), fixed on this contract now (§5.4)
+        from ..services import merchant_fees
+        fee_tier = merchant_fees.tier_of(order.merchant)
+        mdr = merchant_fees.rate_for(order.merchant)
         commission_amount = (product_value * mdr).quantize(plan_engine.CENT)
+        fee_note = f"Merchant discount (MDR) {mdr * 100:.2f}% ({merchant_fees.TIERS[fee_tier][2]} tier)"
         payout_amount = float(product_value - commission_amount)
         
         # Payment 1 (down payment + delivery fee): normally already collected at checkout
@@ -682,7 +700,7 @@ class AdminApproveOrderResource(Resource):
 
             # Ledger: the contract, the merchant side, and the down payment if already received
             ledger.open_plan(instalment_plan, order.total_payable, commission_amount,
-                             payout_amount, user=current_admin)
+                             payout_amount, user=current_admin, fee_note=fee_note)
             if down_payment_received and down_payment_row is not None:
                 ledger.payment_received(instalment_plan, down_payment_row, down_payment_row.amount,
                                         down_payment_reference, user=current_admin)

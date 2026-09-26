@@ -1,4 +1,5 @@
 from flask_restful import Resource, request
+from ..services import merchant_fees
 from flask_praetorian import auth_required, current_user
 from ..models.user import User
 from ..models.transaction import Transaction
@@ -336,26 +337,27 @@ class MerchantGetTransactionStatsResource(Resource):
         ).all()
         
         # Calculate total payout (all time)
-        total_payout = sum(getattr(t, 'payout_amount', t.amount * 0.9) for t in all_completed_transactions)
-        total_commission = sum(getattr(t, 'commission_amount', t.amount * 0.1) for t in all_completed_transactions)
+        splits = [merchant_fees.transaction_split(t, current_merchant) for t in all_completed_transactions]
+        total_payout = sum(p for _f, p in splits)
+        total_commission = sum(f for f, _p in splits)
         
         # Calculate pending payout (completed but not paid)
         pending_transactions = [t for t in all_completed_transactions if getattr(t, 'payment_status', 'pending') == 'pending']
-        pending_payout = sum(getattr(t, 'payout_amount', t.amount * 0.9) for t in pending_transactions)
+        pending_payout = sum(merchant_fees.transaction_split(t)[1] for t in pending_transactions)
         
         # Calculate paid payout
         paid_transactions = [t for t in all_completed_transactions if getattr(t, 'payment_status', '') == 'paid']
-        paid_payout = sum(getattr(t, 'payout_amount', t.amount * 0.9) for t in paid_transactions)
+        paid_payout = sum(merchant_fees.transaction_split(t)[1] for t in paid_transactions)
         
         # This month's payout
         this_month_transactions = [t for t in all_completed_transactions if t.completion_date and t.completion_date >= month_ago]
-        this_month_payout = sum(getattr(t, 'payout_amount', t.amount * 0.9) for t in this_month_transactions)
+        this_month_payout = sum(merchant_fees.transaction_split(t)[1] for t in this_month_transactions)
         
         # Last month's payout (for growth calculation)
         last_month_start = (month_ago - timedelta(days=30)).replace(day=1)
         last_month_end = month_ago - timedelta(days=1)
         last_month_transactions = [t for t in all_completed_transactions if t.completion_date and last_month_start <= t.completion_date <= last_month_end]
-        last_month_payout = sum(getattr(t, 'payout_amount', t.amount * 0.9) for t in last_month_transactions)
+        last_month_payout = sum(merchant_fees.transaction_split(t)[1] for t in last_month_transactions)
         
         # Calculate payout growth
         if last_month_payout > 0:
@@ -635,8 +637,8 @@ class MerchantRecentPayoutsResource(Resource):
                 "id": t.id,
                 "payout_id": t.transaction_id,
                 "amount": float(t.amount),
-                "payout_amount": float(getattr(t, 'payout_amount', t.amount * 0.9)),
-                "commission_amount": float(getattr(t, 'commission_amount', t.amount * 0.1)),
+                "payout_amount": merchant_fees.transaction_split(t)[1],
+                "commission_amount": merchant_fees.transaction_split(t)[0],
                 "status": t.payment_status or 'pending',
                 "date": t.completion_date.isoformat() if t.completion_date else t.created_at.isoformat(),
                 "product_name": t.product_name

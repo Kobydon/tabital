@@ -94,6 +94,9 @@ class User(db.Model):
     # Admins only: 'management' (approvals, rates, settings, reveals, exports) or 'operations'
     # (read-only apart from reminders and notes). See services/access.py
     admin_level = db.Column(db.String(20))
+    # Merchants only: premium | standard | high_risk, set by management (services/merchant_fees.py).
+    # Empty means standard.
+    merchant_fee_tier = db.Column(db.String(20))
     aml_screening = db.Column(db.String(50), default='pending')
     kyc_completed_on = db.Column(db.DateTime)
     

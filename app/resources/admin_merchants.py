@@ -1,4 +1,5 @@
 from flask_restful import Resource, request
+from ..services import merchant_fees
 from flask_praetorian import auth_required, current_user
 from app.models.user import User
 from app.models.instalment import InstalmentPlan
@@ -166,6 +167,7 @@ class AdminGetMerchantsResource(Resource):
             
             merchants.append({
                 "id": merchant.id,
+                **merchant_fees.describe(merchant),   # fee tier (§6.1)
                 "merchant_id": merchant.merchant_id or f"M{merchant.id:04d}",
                 "business_name": merchant.business_name or "N/A",
                 "owner_name": merchant.owner_name or "N/A",
@@ -250,6 +252,7 @@ class AdminGetMerchantDetailResource(Resource):
         return {
             "merchant": {
                 "id": merchant.id,
+                **merchant_fees.describe(merchant),   # fee tier (§6.1)
                 "merchant_id": merchant.merchant_id or f"M{merchant.id:04d}",
                 "business_name": merchant.business_name or "N/A",
                 "owner_name": merchant.owner_name or "N/A",
@@ -304,6 +307,7 @@ class AdminUpdateMerchantStatusResource(Resource):
         return {
             "message": f"Merchant status updated to {new_status}",
             "merchant_id": merchant.id,
+            **merchant_fees.describe(merchant),   # fee tier (§6.1)
             "status": new_status
         }, 200
 

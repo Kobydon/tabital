@@ -1,4 +1,5 @@
 from flask_restful import Resource, request
+from ..services import merchant_fees
 from flask_praetorian import auth_required, current_user
 from app.models.user import User
 from app.models.transaction import Transaction
@@ -141,7 +142,7 @@ class AdminGetTransactionsResource(Resource):
                 "merchant_name": merchant.business_name if merchant else "N/A",
                 "merchant_phone": merchant.phone if merchant else "N/A",
                 "amount": float(transaction.amount),
-                "payout_amount": float(transaction.payout_amount) if transaction.payout_amount else float(transaction.amount * 0.9),
+                "payout_amount": merchant_fees.transaction_split(transaction)[1],
                 "product_name": transaction.product_name,
                 "product_description": transaction.product_description,
                 "quantity": transaction.quantity,
@@ -203,7 +204,7 @@ class AdminGetTransactionDetailResource(Resource):
                 "id": transaction.id,
                 "transaction_id": transaction.transaction_id,
                 "amount": float(transaction.amount),
-                "payout_amount": float(transaction.payout_amount) if transaction.payout_amount else float(transaction.amount * 0.9),
+                "payout_amount": merchant_fees.transaction_split(transaction)[1],
                 "product_name": transaction.product_name,
                 "product_description": transaction.product_description,
                 "quantity": transaction.quantity,

@@ -1,4 +1,5 @@
 from flask_restful import Resource, request
+from ..services import merchant_fees
 from flask_praetorian import auth_required, current_user
 from app.models.user import User
 from app.models.transaction import Transaction
@@ -139,8 +140,8 @@ class AdminGetSettlementsResource(Resource):
                 "merchant_email": merchant.business_email or merchant.email if merchant else "N/A",
                 "product_name": transaction.product_name,
                 "amount": float(transaction.amount),
-                "commission": float(transaction.amount * 0.1),  # 10% commission
-                "payout_amount": float(transaction.payout_amount) if transaction.payout_amount else float(transaction.amount * 0.9),
+                "commission": merchant_fees.transaction_split(transaction, merchant)[0],   # tier fee (§6.1)
+                "payout_amount": merchant_fees.transaction_split(transaction, merchant)[1],
                 "payment_status": transaction.payment_status,
                 "transaction_date": transaction.transaction_date.isoformat() if transaction.transaction_date else None,
                 "completion_date": transaction.completion_date.isoformat() if transaction.completion_date else None,
@@ -194,8 +195,8 @@ class AdminGetSettlementDetailResource(Resource):
                 "id": transaction.id,
                 "transaction_id": transaction.transaction_id,
                 "amount": float(transaction.amount),
-                "commission": float(transaction.amount * 0.1),
-                "payout_amount": float(transaction.payout_amount) if transaction.payout_amount else float(transaction.amount * 0.9),
+                "commission": merchant_fees.transaction_split(transaction)[0],
+                "payout_amount": merchant_fees.transaction_split(transaction)[1],
                 "payment_status": transaction.payment_status,
                 "transaction_date": transaction.transaction_date.isoformat() if transaction.transaction_date else None,
                 "completion_date": transaction.completion_date.isoformat() if transaction.completion_date else None,
@@ -295,8 +296,8 @@ class AdminExportSettlementsResource(Resource):
                 merchant.business_name if merchant else "N/A",
                 settlement.product_name,
                 settlement.amount,
-                settlement.amount * 0.1,
-                settlement.payout_amount if settlement.payout_amount else settlement.amount * 0.9,
+                merchant_fees.transaction_split(settlement, merchant)[0],
+                merchant_fees.transaction_split(settlement, merchant)[1],
                 settlement.payment_status,
                 settlement.transaction_date.strftime("%Y-%m-%d %H:%M:%S") if settlement.transaction_date else "",
                 settlement.completion_date.strftime("%Y-%m-%d %H:%M:%S") if settlement.completion_date else ""

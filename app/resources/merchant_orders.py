@@ -34,7 +34,8 @@ def _payout(order):
             payable = ledger.to_cedis(rows.get(LedgerEntry.MERCHANT_PAYABLE, 0))
     estimated = payable is None
     if estimated:
-        mdr = Decimal(str(SystemSetting.get_value("merchant_fee_percentage", 10))) / 100
+        from ..services import merchant_fees
+        mdr = merchant_fees.rate_for(order.merchant)     # the merchant's tier; fixed on approval
         fee = (product_total * mdr).quantize(Decimal("0.01"))
         payable = product_total - fee
 

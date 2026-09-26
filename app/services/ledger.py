@@ -40,11 +40,13 @@ def record(plan, entry_type, amount, *, account=LedgerEntry.CUSTOMER, payment=No
     return entry
 
 
-def open_plan(plan, total_payable, merchant_fee, merchant_payable, user=None):
-    """Record a new contract: what the customer owes and what the merchant is owed."""
+def open_plan(plan, total_payable, merchant_fee, merchant_payable, user=None, fee_note=None):
+    """Record a new contract: what the customer owes and what the merchant is owed.
+
+    fee_note records the merchant fee tier and rate used, so the contract shows how it was priced."""
     record(plan, LedgerEntry.PLAN_OPENED, total_payable, note="Contract total payable", user=user)
     record(plan, LedgerEntry.MERCHANT_FEE, merchant_fee, account=LedgerEntry.MERCHANT,
-           note="Merchant discount (MDR)", user=user)
+           note=(fee_note or "Merchant discount (MDR)")[:255], user=user)
     record(plan, LedgerEntry.MERCHANT_PAYABLE, merchant_payable, account=LedgerEntry.MERCHANT,
            note="Settlement owed to merchant", user=user)
 

@@ -46,8 +46,14 @@ SETTINGS = [
     _s("service_fee", "pricing", "Service fee", "money", 0,
        "Extra fee added to the financed balance. Standard plans are 0% interest, so keep this at 0.",
        NEW_ORDERS, 0, 1000, "§5.2, §13 #11"),
-    _s("merchant_fee_percentage", "pricing", "Merchant fee (MDR)", "percent", 10,
-       "Kept from the merchant's payout. Includes the 2% gateway fee.", NEW_ORDERS, 0, 30, "§6.1"),
+    _s("merchant_fee_percentage", "pricing", "Merchant fee (MDR): standard tier", "percent", 10,
+       "Kept from the merchant's payout. Includes the 2% gateway fee. Merchants are on this tier unless "
+       "management picks another.", NEW_ORDERS, 0, 30, "§6.1"),
+    _s("merchant_fee_premium_percentage", "pricing", "Merchant fee (MDR): premium / low-risk tier", "percent", 8,
+       "For merchants management puts on the premium tier. Includes the 2% gateway fee.", NEW_ORDERS, 0, 30, "§6.1"),
+    _s("merchant_fee_high_risk_percentage", "pricing", "Merchant fee (MDR): high-risk tier", "percent", 12,
+       "For merchants management puts on the high-risk tier. Includes the 2% gateway fee.", NEW_ORDERS, 0, 30,
+       "§6.1, §13 #2"),
     # Late fees
     _s("late_fee_percentage", "late_fees", "First late fee", "percent", 10,
        "% of the overdue instalment, charged the day after the due date (no grace period).", FROM_NOW, 0, 50,

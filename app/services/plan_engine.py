@@ -138,11 +138,14 @@ def down_payment_rate_for(n_payments, settings_get, pay_in_4_dp_rate=None):
     return rate(settings_get("down_payment_percentage_short_plans", 50)) / 100
 
 
-def quote(price, quantity, n_payments, settings_get, start=None, pay_in_4_dp_rate=None, in_store=False):
+def quote(price, quantity, n_payments, settings_get, start=None, pay_in_4_dp_rate=None, in_store=False,
+          mdr=None):
     """Build a plan using the current system settings (and the customer's tier, if given).
 
     settings_get(key, default) is normally SystemSetting.get_value. in_store: collected at
-    the merchant (payment link / QR sale), so there's no delivery fee.
+    the merchant (payment link / QR sale), so there's no delivery fee. mdr: the merchant's fee as a
+    fraction (services/merchant_fees.rate_for); the standard tier when not given. The MDR only
+    affects the merchant side, never what the customer pays.
     """
     quantity = int(quantity)
     if quantity < 1:
@@ -152,7 +155,7 @@ def quote(price, quantity, n_payments, settings_get, start=None, pay_in_4_dp_rat
         n_payments=n_payments,
         dp_rate=down_payment_rate_for(n_payments, settings_get, pay_in_4_dp_rate),
         service_fee=settings_get("service_fee", 0),
-        mdr=rate(settings_get("merchant_fee_percentage", 10)) / 100,
+        mdr=rate(mdr) if mdr is not None else rate(settings_get("merchant_fee_percentage", 10)) / 100,
         delivery_fee=0 if in_store else settings_get("delivery_fee", 50),
         start=start,
     )

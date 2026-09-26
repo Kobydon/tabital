@@ -67,6 +67,7 @@ class AdminGetPendingKYCResource(Resource):
                 
                 result.append({
                     "merchant_id": merchant.id,
+                    **merchant_fees.describe(merchant),   # fee tier (§6.1)
                     "merchant_name": merchant.business_name or merchant.full_name,
                     "owner_name": merchant.owner_name,
                     "phone": merchant.phone,
@@ -112,6 +113,7 @@ class AdminGetVerifiedKYCResource(Resource):
         for merchant in verified_merchants:
             result.append({
                 "merchant_id": merchant.id,
+                **merchant_fees.describe(merchant),   # fee tier (§6.1)
                 "merchant_name": merchant.business_name or merchant.full_name,
                 "owner_name": merchant.owner_name,
                 "phone": merchant.phone,
@@ -151,6 +153,7 @@ class AdminGetRejectedKYCResource(Resource):
             
             result.append({
                 "merchant_id": merchant.id,
+                **merchant_fees.describe(merchant),   # fee tier (§6.1)
                 "merchant_name": merchant.business_name or merchant.full_name,
                 "owner_name": merchant.owner_name,
                 "phone": merchant.phone,
@@ -213,6 +216,7 @@ class AdminGetMerchantKYCResource(Resource):
         return {
             "merchant": {
                 "id": merchant.id,
+                **merchant_fees.describe(merchant),   # fee tier (§6.1)
                 "business_name": merchant.business_name,
                 "owner_name": merchant.owner_name,
                 "phone": merchant.phone,
@@ -248,7 +252,15 @@ class AdminApproveKYCResource(Resource):
         merchant = User.query.get(merchant_id)
         if not merchant or merchant.role != 'merchant':
             return {"error": "Merchant not found"}, 404
-        
+
+        # Optional merchant fee tier chosen by management at approval (§6.1)
+        from ..services import merchant_fees
+        try:
+            merchant_fees.apply_at_approval(merchant, request.get_json(silent=True) or {}, current_admin)
+        except merchant_fees.FeeTierError as e:
+            db.session.rollback()
+            return {"error": str(e)}, 400
+
         try:
             # Update all documents to verified
             documents = Document.query.filter_by(user_id=merchant.id).all()
@@ -269,16 +281,10 @@ class AdminApproveKYCResource(Resource):
             
             # Create notification for the merchant
             try:
-                notification_title = "✅ KYC Verification Approved"
-                notification_message = f"""Congratulations {merchant.business_name or merchant.full_name}! Your KYC verification has been approved.
-
-Your account is now fully verified and your status has been updated to 'approved'. You can now:
-• Add and manage products
-• Receive payments
-• Access all merchant features
-• Apply for merchant loans
-
-Thank you for completing your verification."""
+                notification_title = "KYB verification approved"
+                notification_message = (f"Your business {merchant.business_name or merchant.full_name} is verified and "
+                                        "your account is approved. You can now add products, sell with Tabital Pay "
+                                        "and receive settlements.")
                 
                 Notifications.create_notification(
                     user_id=merchant.id,
@@ -319,6 +325,7 @@ Thank you for completing your verification."""
             return {
                 "message": "KYC verification approved successfully",
                 "merchant_id": merchant.id,
+                **merchant_fees.describe(merchant),   # fee tier (§6.1)
                 "kyc_status": "verified",
                 "user_status": merchant.status,
                 "notification_sent": True
@@ -418,6 +425,7 @@ Please upload corrected documents for re-verification."""
             return {
                 "message": "KYC verification rejected",
                 "merchant_id": merchant.id,
+                **merchant_fees.describe(merchant),   # fee tier (§6.1)
                 "kyc_status": "rejected",
                 "rejection_reason": rejection_reason,
                 "notification_sent": True

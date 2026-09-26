@@ -103,9 +103,11 @@ class CustomerPurchaseResource(Resource):
             return {"error": "You're not eligible for a payment plan right now",
                     "reasons": decision.reasons}, 403
 
+        from ..services import merchant_fees
         try:
             plan = plan_engine.quote(product.price, quantity, number_of_installments, SystemSetting.get_value,
-                                     pay_in_4_dp_rate=decision.pay_in_4_dp_rate, in_store=link is not None)
+                                     pay_in_4_dp_rate=decision.pay_in_4_dp_rate, in_store=link is not None,
+                                     mdr=merchant_fees.rate_for(merchant))      # merchant side only (§6.1)
         except plan_engine.PlanError as e:
             db.session.commit()
             return {"error": str(e)}, 400
