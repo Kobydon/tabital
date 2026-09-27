@@ -25,7 +25,8 @@ class AdminPiiRevealResource(Resource):
         user = User.query.get(data.get('user_id'))
         if not user:
             return {"error": "User not found"}, 404
-        ip = (request.headers.get('X-Forwarded-For') or request.remote_addr or '').split(',')[0].strip()[:64]
+        from ..services.attempts import client_ip
+        ip = client_ip()      # the proxy-added hop: a client can't forge the address in the audit log
         db.session.add(PiiAccess(admin_id=admin.id, user_id=user.id, field=field, reason=reason[:300], ip=ip))
         db.session.commit()
         return {"field": field, "label": pii.REVEALABLE[field], "value": getattr(user, field)}, 200
