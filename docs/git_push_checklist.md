@@ -18,8 +18,8 @@ branches are stacked on top of it, each one containing the one before. Nothing i
 | | `tabital` (API) | `tabital_front` (web app) |
 |---|---|---|
 | `main` = `origin/main` | `b25c78c` (2026-06-09) | `bc298cd` (2026-06-09) |
-| Current branch | `phase7-unit-economics` (`0b7d26b`) | `phase7-unit-economics` (`82b5909`) |
-| Commits to push (`main..phase7-unit-economics`) | **42** | **29** |
+| Current branch | `phase7-unit-economics` (run `git rev-parse --short HEAD`) | `phase7-unit-economics` (`fa44c71`) |
+| Commits to push (`main..phase7-unit-economics`) | **43** | **29** |
 | Uncommitted changes / stashes | none | none |
 | Merge commits in the new work | none | none |
 
@@ -35,7 +35,7 @@ New commits on each branch (compared with the branch before it):
 | `phase5-settlements` | 2 | 1 |
 | `phase6-identity-fraud` | 2 | 1 |
 | `phase6b-deferment` | 1 | 1 |
-| `phase7-unit-economics` | 20 | 19 |
+| `phase7-unit-economics` | 21 | 19 |
 
 - Every branch is a descendant of the one before it, and of `main`. None is behind.
 - So `main` **can be fast-forwarded** to `phase7-unit-economics`: no merge is needed, and every
@@ -85,7 +85,7 @@ You have two options.
 by a marker. What that involves:
 
 - **Every commit hash changes** from the first bad commit (2026-05-05) onward. That's almost all of
-  `main`'s history and all 42 new commits.
+  `main`'s history and all 43 new commits.
 - **GitHub `main` has to be force-pushed**, and branch protection (if any) must allow it. Render
   deploys from `main`, so the force-push can start a deploy (see section e).
 - **Everyone who has a copy has to re-clone.** Old clones can't be pulled into the new history.
@@ -145,7 +145,7 @@ for ($i = 1; $i -lt $branches.Count; $i++) {
     $ok = if ($LASTEXITCODE -eq 0) { "OK" } else { "NOT STACKED" }
     "{0} -> {1}: {2}" -f $branches[$i-1], $branches[$i], $ok
 }
-git rev-list --count origin/main..phase7-unit-economics      # tabital 42, tabital_front 29
+git rev-list --count origin/main..phase7-unit-economics      # tabital 43, tabital_front 29
 ```
 
 Every line must say `OK`.
@@ -231,7 +231,7 @@ Don't push `main` here. Then open the pull request in the browser:
 - https://github.com/Kobydon/tabital/compare/main...phase7-unit-economics
 - https://github.com/Kobydon/tabital_front/compare/main...phase7-unit-economics
 
-It should list 42 commits (`tabital`) and 29 commits (`tabital_front`).
+It should list 43 commits (`tabital`) and 29 commits (`tabital_front`).
 
 Opening a pull request per phase (each against the branch before it) also works, but it's nine pull
 requests per repo that must be merged in order. One pull request is simpler.
@@ -259,8 +259,8 @@ the branch:**
 
 | Bundle | Bundle tip | Branch tip | Missing commit |
 |---|---|---|---|
-| `tabital-phase7-unit-economics.bundle` | `ee4e2cc` | `0b7d26b` | Deferment fee is 10% of what's still owed |
-| `tabital_front-phase7-unit-economics.bundle` | `da07d9f` | `82b5909` | Deferment wording |
+| `tabital-phase7-unit-economics.bundle` | refreshed 2026-09-27 | matches the branch tip | `git bundle list-heads` shows the same hash as `git rev-parse phase7-unit-economics` |
+| `tabital_front-phase7-unit-economics.bundle` | refreshed 2026-09-27 | `fa44c71` | matches the branch tip |
 
 The phase 0–6b bundles match their branches. Remake the phase 7 bundles on **this** computer
 before using them anywhere else:
@@ -270,7 +270,7 @@ Set-Location "$root\tabital"
 git bundle create "$root\handoff\tabital-phase7-unit-economics.bundle" main..phase7-unit-economics
 Set-Location "$root\tabital_front"
 git bundle create "$root\handoff\tabital_front-phase7-unit-economics.bundle" main..phase7-unit-economics
-git bundle list-heads "$root\handoff\tabital_front-phase7-unit-economics.bundle"   # 82b5909…
+git bundle list-heads "$root\handoff\tabital_front-phase7-unit-economics.bundle"   # fa44c71…
 ```
 
 On the other computer (copy the `handoff` folder there first):
@@ -285,11 +285,11 @@ foreach ($b in "phase0-security","phase1-ledger","phase2-paystack","phase3-under
                "phase7-unit-economics") {
     git fetch "$h\tabital-$b.bundle" "${b}:${b}"
 }
-git log --oneline -1 phase7-unit-economics                         # 0b7d26b
+git log --oneline -1 phase7-unit-economics                         # same as git rev-parse --short phase7-unit-economics
 ```
 
 Same for `tabital_front` (clone `Kobydon/tabital_front`, bundles `tabital_front-*.bundle`, tip
-`82b5909`). Then run section c and push as above.
+`fa44c71`). Then run section c and push as above.
 
 `git bundle verify` fails with "requires this ref" if GitHub `main` no longer contains `b25c78c`
 (`tabital`) or `bc298cd` (`tabital_front`), for example after a history rewrite.
@@ -301,7 +301,7 @@ Same for `tabital_front` (clone `Kobydon/tabital_front`, bundles `tabital_front-
    git ls-remote --heads origin
    git rev-parse phase7-unit-economics
    ```
-   GitHub's `phase7-unit-economics` must be the same hash (`0b7d26b…` for `tabital`, `82b5909…` for
+   GitHub's `phase7-unit-economics` must be the same hash (the tip printed by `git rev-parse --short phase7-unit-economics` for `tabital`, `fa44c71…` for
    `tabital_front`). The branches page on GitHub shows all nine phase branches.
 2. **Warning: Render deploys from `main`, and may do it by itself.** If the Render services have
    Auto-Deploy on (the Render default), the moment `main` changes, Render builds the new code. The new
