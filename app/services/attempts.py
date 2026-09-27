@@ -67,8 +67,10 @@ def failures(kind, subject, since) -> int:
     last_ok = db.session.query(db.func.max(LoginAttempt.created_at)).filter(
         LoginAttempt.kind == kind, LoginAttempt.subject == subject, LoginAttempt.success.is_(True)).scalar()
     start = max(since, last_ok) if last_ok else since
+    # ">=": clocks tick coarsely (about 16 ms on Windows), so an attempt can share its timestamp with
+    # the boundary (e.g. the moment a reset code was issued); it must still count
     return LoginAttempt.query.filter(LoginAttempt.kind == kind, LoginAttempt.subject == subject,
-                                     LoginAttempt.success.is_(False), LoginAttempt.created_at > start).count()
+                                     LoginAttempt.success.is_(False), LoginAttempt.created_at >= start).count()
 
 
 def ip_spraying(kind, ip, subject, since, limit) -> bool:
