@@ -382,7 +382,15 @@ class AdminUpdateCustomerStatusResource(Resource):
         customer = User.query.filter_by(id=customer_id, role='customer').first()
         if not customer:
             return {"error": "Customer not found"}, 404
-        
+        if new_status == 'suspended':
+            # A suspended account can't sign in, so it mustn't still owe or be owed money
+            from ..services import accounts
+            reason_blocked = accounts.deactivation_blocker(customer)
+            if reason_blocked:
+                return {"error": reason_blocked + " Use 'restricted' to stop new purchases meanwhile."}, 409
+        if len((reason or '').strip()) < 5:
+            return {"error": "Give a reason (at least 5 characters). It's kept with the change."}, 400
+        _log_status_change(customer, new_status, reason, current_admin)      # before: it records the old status
         customer.status = new_status
         
         # Log the status change (you can create an ActivityLog model)
@@ -423,3 +431,11 @@ class AdminAddCustomerNoteResource(Resource):
             "customer_id": customer.id,
             "note": note
         }, 201
+
+def _log_status_change(user, new_status, reason, admin):
+    """Who changed an account's status, from what, to what, and why (setting_changes)."""
+    import json
+    from ..models.system_settings import SettingChange
+    db.session.add(SettingChange(setting_key=f"account_status:{user.id}", old_value=json.dumps(user.status),
+                                 new_value=json.dumps(new_status), changed_by=admin.id,
+                                 reason=(reason or "").strip()[:500]))

@@ -110,12 +110,12 @@ class AdminDashboardStatsResource(Resource):
         total_exposure = ledger.portfolio_totals(InstalmentPlan.status == 'active')['outstanding']
         start_of_today = datetime(now.year, now.month, now.day)
         def overdue_between(min_days, max_days=None):
-            q = db.session.query(func.coalesce(func.sum(InstalmentPayment.amount + InstalmentPayment.late_fee), 0))\
-                .filter(InstalmentPayment.status == 'overdue',
-                        InstalmentPayment.due_date <= start_of_today - timedelta(days=min_days))
+            # What's still owed on those instalments (unpaid late fees, minus part payments)
+            q = InstalmentPayment.query.filter(InstalmentPayment.status == 'overdue',
+                                               InstalmentPayment.due_date <= start_of_today - timedelta(days=min_days))
             if max_days is not None:
                 q = q.filter(InstalmentPayment.due_date > start_of_today - timedelta(days=max_days + 1))
-            return float(q.scalar() or 0)
+            return float(sum(p.get_total_due() for p in q.all()))
         early_risk = overdue_between(1, 30)     # DPD 1-30: early delinquency
         late_risk = overdue_between(31, 60)     # DPD 31-60: high risk
         default_risk = overdue_between(61)      # DPD 61+: default watch / charge-off

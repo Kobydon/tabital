@@ -109,8 +109,8 @@ def test_reset_codes_give_one_answer_and_a_daily_limit(app_ctx):  # noqa: F811
     answers.add(client.post(url, json={"email": "kwame@example.com", "otp": "654321"}).get_json()["error"])
     assert len(answers) == 1
 
-    # Across fresh codes, 10 failures a day is the limit
-    for _ in range(8):
+    # Across fresh codes, 10 wrong guesses against real codes a day is the limit
+    for _ in range(10):
         user.reset_otp, user.reset_otp_expiry = "654321", datetime.utcnow() + timedelta(minutes=10)
         db.session.commit()
         client.post(url, json={"email": "kwame@example.com", "otp": "000000"})

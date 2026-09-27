@@ -23,6 +23,11 @@ class CustomerPurchaseResource(Resource):
         if current_customer.role != 'customer':
             return {"error": "Unauthorized"}, 403
         
+        # Restricted accounts can sign in to pay, but can't buy
+        if current_customer.status not in ('approved', 'active'):
+            return {"error": "Your account is restricted: you can pay your plans, but new purchases are paused. "
+                             "Contact us to find out more."}, 403
+
         # KYC is enforced here, not only in the UI (and again by the eligibility rules)
         if current_customer.kyc_status != 'verified':
             return {"error": "Complete KYC verification before making a purchase"}, 403

@@ -72,7 +72,9 @@ def transaction_fields(transaction, merchant=None) -> dict:
     fee, payout = transaction_split(transaction, merchant)
     amount = float(transaction.amount or 0)
     return {"commission_rate": round(fee / amount * 100, 2) if amount else 0.0,
-            "commission_amount": fee, "payout_amount": payout}
+            "commission_amount": fee, "payout_amount": payout,
+            # No payout stored on this (older) sale: worked out from the merchant's current tier
+            "payout_estimated": transaction.payout_amount is None}
 
 
 def apply_at_approval(merchant, data, admin):

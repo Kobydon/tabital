@@ -300,7 +300,16 @@ class AdminUpdateMerchantStatusResource(Resource):
         merchant = User.query.filter_by(id=merchant_id, role='merchant').first()
         if not merchant:
             return {"error": "Merchant not found"}, 404
-        
+        if new_status == 'suspended':
+            # A suspended account can't sign in, so it mustn't still owe or be owed money
+            from ..services import accounts
+            reason_blocked = accounts.deactivation_blocker(merchant)
+            if reason_blocked:
+                return {"error": reason_blocked + " Use 'restricted' to stop new sales meanwhile."}, 409
+        if len((reason or '').strip()) < 5:
+            return {"error": "Give a reason (at least 5 characters). It's kept with the change."}, 400
+        from .admin_customers import _log_status_change
+        _log_status_change(merchant, new_status, reason, current_admin)      # before: it records the old status
         merchant.status = new_status
         db.session.commit()
         

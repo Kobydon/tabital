@@ -507,6 +507,11 @@ def register_routes(app):
     api.add_resource(CustomerPlanOptionsResource, "/customer/plan-options")
 
     # Masked personal data on admin screens: reveal one value with a reason (logged)
+    from .resources.payment_claims import (AdminPaymentClaimsResource, AdminPaymentClaimConfirmResource,
+                                           AdminPaymentClaimRejectResource)
+    api.add_resource(AdminPaymentClaimsResource, "/admin/payment-claims")
+    api.add_resource(AdminPaymentClaimConfirmResource, "/admin/payment-claims/<int:claim_id>/confirm")
+    api.add_resource(AdminPaymentClaimRejectResource, "/admin/payment-claims/<int:claim_id>/reject")
     from .resources.merchant_fee_tiers import AdminMerchantFeeTiersResource, AdminMerchantFeeTierResource
     api.add_resource(AdminMerchantFeeTiersResource, "/admin/merchant-fee-tiers")
     api.add_resource(AdminMerchantFeeTierResource, "/admin/merchants/<int:merchant_id>/fee-tier")

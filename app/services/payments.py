@@ -47,6 +47,7 @@ def record_payment(payment, amount, payment_method, payment_reference, user=None
     """
     from ..models.part_payment import InstalmentPartPayment
 
+    payment = lock(payment)
     if payment.status == 'paid':
         raise PaymentError("This instalment is already paid")
     if payment.status == 'pending_verification':
@@ -79,6 +80,47 @@ def record_payment(payment, amount, payment_method, payment_reference, user=None
     return 'part'
 
 
+def lock(payment):
+    """Re-read the instalment with a row lock (Postgres SELECT ... FOR UPDATE) so two payments,
+    a webhook and a collections entry, can't both read the same 'still owed' and double-record.
+    SQLite ignores the lock; tests run one request at a time."""
+    from ..models.instalment_payment import InstalmentPayment
+    if payment.id is None:
+        return payment
+    return db.session.query(InstalmentPayment).with_for_update().populate_existing()\
+        .filter(InstalmentPayment.id == payment.id).one()
+
+
+def waive_late_fee(payment, reason, user=None):
+    """Waive what's left of an instalment's late fee. Doesn't commit. Returns the amount waived.
+
+    Money goes to the instalment first, then the fee, so part payments above the instalment amount
+    have already paid part of the fee: that part can't be waived (it would leave the customer in
+    credit). If nothing is owed after the waiver, the instalment is complete.
+    """
+    payment = lock(payment)
+    if not payment.late_fee:
+        raise PaymentError("No late fee to waive")
+    if payment.late_fee_paid:
+        raise PaymentError("This late fee was already paid; issue a refund instead")
+    amount = Decimal(str(payment.amount)).quantize(CENT)
+    fee = Decimal(str(payment.late_fee)).quantize(CENT)
+    covered = min(fee, max(Decimal("0.00"), payment.part_paid() - amount))
+    waivable = fee - covered
+    if waivable <= 0:
+        raise PaymentError("The late fee has already been paid through part payments")
+    plan = InstalmentPlan.query.get(payment.plan_id)
+    ledger.late_fee_waived(plan, payment, waivable, reason=reason, user=user)
+    # The instalment stays overdue; late_fee_applied_date stays set so the fee isn't charged again
+    payment.late_fee = float(covered)
+    db.session.flush()
+    if Decimal(str(payment.get_total_due())) <= 0:
+        # Part payments already cover what's left: the instalment is paid (no new money)
+        last = payment.part_payments()[-1]
+        mark_instalment_paid(payment, last.method, last.reference, amount_received=0, user=user)
+    return waivable
+
+
 def mark_instalment_paid(payment, payment_method, payment_reference, amount_received=None, user=None):
     """Record the payment that completes an instalment, write it to the ledger, and update the plan.
 
@@ -88,9 +130,10 @@ def mark_instalment_paid(payment, payment_method, payment_reference, amount_rece
     remaining_amount tracks the financed balance, which excludes Payment 1
     (down payment + delivery fee), so only instalments 2..N reduce it.
     """
+    payment = lock(payment)
     owed = Decimal(str(payment.get_total_due())).quantize(CENT)
     before = payment.part_paid()
-    this_payment = Decimal(str(amount_received)).quantize(CENT) if amount_received else owed
+    this_payment = Decimal(str(amount_received)).quantize(CENT) if amount_received is not None else owed
     payment.status = 'paid'
     payment.paid_date = datetime.utcnow()
     payment.paid_amount = float(before + this_payment)
@@ -102,7 +145,8 @@ def mark_instalment_paid(payment, payment_method, payment_reference, amount_rece
 
     plan = InstalmentPlan.query.get(payment.plan_id)
     if plan:
-        ledger.payment_received(plan, payment, this_payment, payment_reference, user=user)
+        if this_payment > 0:           # a waiver can complete an instalment with no new money
+            ledger.payment_received(plan, payment, this_payment, payment_reference, user=user)
         plan.paid_installments = (plan.paid_installments or 0) + 1
         if payment.installment_number > 1:
             plan.remaining_amount = round((plan.remaining_amount or 0) - payment.amount, 2)
@@ -160,7 +204,7 @@ def apply_verified_transaction(intent, data):
         from . import deferment
         return deferment.apply_paid(intent)
 
-    payment = intent.payment
+    payment = lock(intent.payment)
     if payment.status == 'paid':
         # Already settled another way (admin or another attempt): flag for refund review
         intent.status = PaymentIntent.SUCCESS

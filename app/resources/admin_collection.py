@@ -38,7 +38,7 @@ class AdminCollectionStatsResource(Resource):
         
         today = datetime.now().date()
         overdue = InstalmentPayment.query.filter(InstalmentPayment.status == 'overdue').all()
-        total_overdue = sum((p.amount or 0) + (p.late_fee or 0 if not p.late_fee_paid else 0) for p in overdue)
+        total_overdue = sum(p.get_total_due() for p in overdue)      # still owed, after part payments
         accounts_overdue = len({p.plan.customer_id for p in overdue if p.plan})
         
         body = {
@@ -47,7 +47,7 @@ class AdminCollectionStatsResource(Resource):
         }
         for key, label, lo, hi in BUCKETS:
             rows = _overdue_query(lo, hi, today).all()
-            body[f"overdue_{key}"] = float(sum((p.amount or 0) + (p.late_fee or 0) for p in rows))
+            body[f"overdue_{key}"] = float(sum(p.get_total_due() for p in rows))
             body[f"count_{key}"] = len(rows)
         body["buckets"] = [{"key": k, "label": f"{label} days"} for k, label, _, _ in BUCKETS]
         return body, 200

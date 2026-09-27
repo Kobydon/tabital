@@ -74,8 +74,24 @@ def test_accounts_are_suspended_not_deleted_and_edits_cant_skip_approval(app_ctx
     assert client.patch("/admin/customers/bulk-update", headers=admin_h,
                         json={"ids": [customer.id], "data": {"status": "approved"}}).status_code == 400
 
+    # Still owes money: can't be deactivated (they must be able to sign in and pay)
     res = client.delete(f"/admin/customers/{customer.id}", headers=admin_h)
-    assert res.status_code == 200 and User.query.get(customer.id).status == "suspended"
+    assert res.status_code == 409 and "still owes" in res.get_json()["error"]
+    assert User.query.get(customer.id).status == "approved"
+    assert client.put(f"/admin/customers/{customer.id}/status", headers=admin_h,
+                      json={"status": "suspended", "reason": "Testing the guard"}).status_code == 409
+    # Restricted: can still sign in (to pay) but not buy
+    assert client.put(f"/admin/customers/{customer.id}/status", headers=admin_h,
+                      json={"status": "restricted", "reason": "Missed payments"}).status_code == 200
+    ch = token(client, customer.phone)
+    from app.models.product import Product
+    res = client.post("/customer/purchase", headers=ch, json={"accept_terms": True, "product_id": Product.query.first().id,
+                                                              "number_of_installments": 1, "delivery_address": "Osu"})
+    assert res.status_code == 403 and "restricted" in res.get_json()["error"]
+    # Someone who owes nothing can be deactivated; records are kept
+    other = make_user("customer", "0200000503")
+    res = client.delete(f"/admin/customers/{other.id}", headers=admin_h)
+    assert res.status_code == 200 and User.query.get(other.id).status == "suspended"
     assert InstalmentPlan.query.get(plan.id) is not None
     res = client.delete(f"/admin/merchants/{merchant.id}", headers=admin_h)
     assert res.status_code == 200 and User.query.get(merchant.id).status == "suspended"

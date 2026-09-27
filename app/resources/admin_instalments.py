@@ -299,7 +299,7 @@ class AdminWaiveLateFeeResource(Resource):
         if current_admin.role != 'admin':
             return {"error": "Unauthorized"}, 403
         
-        from app.services import ledger
+        from app.services import payments
 
         data = request.get_json() or {}
         reason = (data.get('reason') or '').strip()
@@ -307,23 +307,22 @@ class AdminWaiveLateFeeResource(Resource):
         payment = InstalmentPayment.query.get(payment_id)
         if not payment:
             return {"error": "Payment not found"}, 404
-
-        if not payment.late_fee:
-            return {"error": "No late fee to waive"}, 400
-        if payment.late_fee_paid:
-            return {"error": "This late fee was already paid; issue a refund instead"}, 400
         if not reason:
             return {"error": "A reason is required to waive a late fee"}, 400
 
-        plan = InstalmentPlan.query.get(payment.plan_id)
-        ledger.late_fee_waived(plan, payment, payment.late_fee, reason=reason, user=current_admin)
-        # The instalment stays overdue; late_fee_applied_date stays set so the fee isn't charged again
-        payment.late_fee = 0
+        # Only the part of the fee not already covered by part payments (services/payments.py)
+        try:
+            waived = payments.waive_late_fee(payment, reason, user=current_admin)
+        except payments.PaymentError as e:
+            db.session.rollback()
+            return {"error": str(e)}, 400
         db.session.commit()
-        
+
         return {
-            "message": f"Late fee waived successfully. Reason: {reason}",
-            "payment_id": payment.payment_id
+            "message": f"Late fee of {float(waived):.2f} waived. Reason: {reason}",
+            "payment_id": payment.payment_id,
+            "status": payment.status,
+            "still_owed": payment.get_total_due()
         }, 200
 
 

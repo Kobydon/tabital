@@ -131,7 +131,9 @@ class User(db.Model):
         return cls.query.get(id)
     
     def is_valid(self):
-        return self.status == 'approved'
+        """Checked by flask_praetorian on sign-in and every request. 'active' is the status admins set
+        to reinstate an account; 'restricted' can still sign in to pay (not buy: customer_purchase.py)."""
+        return self.status in ('approved', 'active', 'restricted')
     
     @staticmethod
     def get_next_customer_id():

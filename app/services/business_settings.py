@@ -227,6 +227,13 @@ def apply_changes(changes, reason, admin):
     cap = clean.get("late_fee_cap_percentage", current("late_fee_cap_percentage"))
     if not errors and lf > cap:
         errors["late_fee_cap_percentage"] = "the cap can't be lower than the first late fee"
+    # Merchant fee tiers must stay in order: premium <= standard <= high-risk (§6.1)
+    premium = clean.get("merchant_fee_premium_percentage", current("merchant_fee_premium_percentage"))
+    standard = clean.get("merchant_fee_percentage", current("merchant_fee_percentage"))
+    high = clean.get("merchant_fee_high_risk_percentage", current("merchant_fee_high_risk_percentage"))
+    if not errors and not (premium <= standard <= high):
+        errors["merchant_fee_percentage"] = ("merchant fee tiers must be in order: premium ≤ standard ≤ high-risk "
+                                             f"(now {premium}%, {standard}%, {high}%)")
     if errors:
         raise SettingsError(errors)
 

@@ -90,8 +90,13 @@ class InstallmentCalculatorResource(Resource):
             product_price = plan_engine.money(data.get('product_price', 0))
             quantity = int(data.get('quantity', 1))
             number_of_installments = int(data.get('number_of_installments', 1))
+            # A merchant sees their own tier's fee; customers never see merchant figures (below)
+            mdr = None
+            if current_user_obj.role == 'merchant':
+                from ..services import merchant_fees
+                mdr = merchant_fees.rate_for(current_user_obj)
             plan = plan_engine.quote(product_price, quantity, number_of_installments, SystemSetting.get_value,
-                                     pay_in_4_dp_rate=tier_dp_rate, in_store=bool(data.get('in_store')))
+                                     pay_in_4_dp_rate=tier_dp_rate, in_store=bool(data.get('in_store')), mdr=mdr)
         except (plan_engine.PlanError, ArithmeticError, TypeError, ValueError) as e:
             return {"error": str(e) or "Invalid plan request"}, 400
 
@@ -115,14 +120,15 @@ class InstallmentCalculatorResource(Resource):
             "fees": {
                 "service_fee": f(plan["service_fee"]),
                 "delivery_fee": f(plan["delivery_fee"]),
-                "merchant_fee_percentage": f(plan["merchant_fee_rate"] * 100),
-                "merchant_fee_amount": f(plan["merchant_fee"]),
                 "late_fee_percentage": late_fee_percentage
             },
             "totals": {
                 "total_payable": f(plan["total_payable"]),
-                "merchant_payout": f(plan["merchant_settlement"])
             },
+            # Merchant side only for merchants (their own tier) and admins; never in a customer's quote
+            **({"merchant": {"fee_percentage": f(plan["merchant_fee_rate"] * 100),
+                             "fee_amount": f(plan["merchant_fee"]), "payout": f(plan["merchant_settlement"])}}
+               if current_user_obj.role in ('merchant', 'admin') else {}),
             "payment_schedule": plan_engine.schedule_to_json(plan["schedule"]),
             # For customers: eligibility and available limit, so the Shop can warn before checkout
             "credit": credit,

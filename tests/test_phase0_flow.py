@@ -125,14 +125,16 @@ def test_purchase_is_priced_by_server_and_payment_needs_verification(client):
         "plan_id": plan.id, "amount": 999999, "payment_method": "mobile_money",
         "payment_reference": "MOMO-456"})
     assert res.status_code == 202, res.get_json()
+    claim_id = res.get_json()["claim_id"]
     db.session.refresh(payments[1])
-    assert payments[1].status == "pending_verification"
+    assert payments[1].status == "pending"          # only a claim: late fees and collections carry on
     db.session.refresh(plan)
     assert plan.remaining_amount == 2400
 
-    res = client.put(f"/admin/instalments/payments/{payments[1].id}/mark-paid",
-                     headers=auth(a_token), json={})
+    # Tabital confirms the money arrived: recorded through the normal payment service
+    res = client.post(f"/admin/payment-claims/{claim_id}/confirm", headers=auth(a_token), json={})
     assert res.status_code == 200, res.get_json()
+    assert res.get_json()["outcome"] == "paid"
     db.session.refresh(plan)
     assert plan.remaining_amount == 1600
     assert plan.paid_installments == 2

@@ -234,7 +234,17 @@ class AdminUpdateUserStatusResource(Resource):
         user = User.query.get(user_id)
         if not user:
             return {"error": "User not found"}, 404
-        
+        if len((reason or '').strip()) < 5:
+            return {"error": "Give a reason (at least 5 characters). It's kept with the change."}, 400
+        if new_status == 'suspended':
+            # A suspended account can't sign in, so it mustn't still owe or be owed money
+            from ..services import accounts
+            blocked = accounts.deactivation_blocker(user)
+            if blocked:
+                return {"error": blocked + " Use 'restricted' meanwhile."}, 409
+
+        from .admin_customers import _log_status_change
+        _log_status_change(user, new_status, reason, current_admin)
         old_status = user.status
         user.status = new_status
         
@@ -260,11 +270,13 @@ class AdminDeleteUserResource(Resource):
         if not user:
             return {"error": "User not found"}, 404
         
-        # Soft delete - set status to suspended
-        user.status = 'suspended'
-        
-        db.session.commit()
-        
+        # Suspend, never delete; refused while money is still owed (services/accounts.py)
+        from ..services import accounts
+        try:
+            accounts.deactivate(user)
+        except ValueError as e:
+            return {"error": str(e)}, 409
+
         return {
             "message": f"User {user_id} has been deactivated",
             "user_id": user.id,

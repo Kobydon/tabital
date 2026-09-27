@@ -139,6 +139,9 @@ def login_user(identifier, password):
     if (attempts.failures(LoginAttempt.LOGIN, subject, window) > cfg.get('LOGIN_MAX_FAILURES', 5)
             or attempts.ip_spraying(LoginAttempt.LOGIN, ip, subject, window,
                                     cfg.get('LOGIN_MAX_ACCOUNTS_PER_IP', 20))):
+        # A refused try isn't counted (it was only written so parallel requests see each other),
+        # so waiting out the window always works
+        attempts.discard(attempt)
         minutes = cfg.get('LOGIN_WINDOW_MINUTES', 15)
         raise AuthError(f'Too many failed attempts. Please wait {minutes} minutes and try again, '
                         'or reset your password.', 429)
@@ -151,7 +154,8 @@ def login_user(identifier, password):
     if not ok:
         raise AuthError('Invalid phone or password', 401)
     attempts.succeed(attempt)
-    if user.status not in ('approved', 'active'):
+    # Restricted accounts can still sign in to pay what they owe (they can't buy: customer_purchase.py)
+    if user.status not in ('approved', 'active', 'restricted'):
         raise AuthError('Account not approved yet. Please wait for admin approval.', 403)
 
     return guard.encode_jwt_token(user)
@@ -170,6 +174,17 @@ class ForgotPasswordResource(Resource):
 
         if not email:
             return {"error": "Email address is required"}, 400
+
+        # At most RESET_REQUESTS_PER_IP_PER_HOUR from one address (same answer either way), so this
+        # can't be used to flood someone's inbox
+        from . import attempts
+        from ..models.login_attempt import LoginAttempt
+        ip = attempts.client_ip()
+        hour_ago = datetime.utcnow() - timedelta(hours=1)
+        attempts.begin(LoginAttempt.RESET, f"ip:{ip}", email, ip)
+        if ip and attempts.failures(LoginAttempt.RESET, f"ip:{ip}", hour_ago) > \
+                current_app.config.get('RESET_REQUESTS_PER_IP_PER_HOUR', 10):
+            return _generic_reset_response()
 
         user = User.query.filter_by(business_email=email).first()
         if not user:
@@ -268,13 +283,30 @@ class ForgotPasswordResource(Resource):
                 </html>
                 """
             )
-            mail.send(msg)
+            _send_in_background(msg)
         except Exception:
             # Logged, but the answer stays the same: an error only for real accounts would tell
             # anyone which emails are registered
             current_app.logger.exception("Failed to send password reset email")
 
         return _generic_reset_response()
+
+
+def _send_in_background(msg):
+    """Send without making the request wait, so a real account answers as fast as an unknown one."""
+    import threading
+    app = current_app._get_current_object()
+    if app.config.get('TESTING'):
+        mail.send(msg)
+        return
+
+    def run():
+        with app.app_context():
+            try:
+                mail.send(msg)
+            except Exception:              # noqa: BLE001
+                app.logger.exception("Failed to send password reset email")
+    threading.Thread(target=run, daemon=True).start()
 
 
 class VerifyResetOTPResource(Resource):
@@ -298,15 +330,19 @@ class VerifyResetOTPResource(Resource):
         now = datetime.utcnow()
         ip = attempts.client_ip()
         user = User.query.filter_by(business_email=email).first()
-        subject = attempts.subject_for(user, email)
+        active = bool(user and user.reset_otp and user.reset_otp_expiry and user.reset_otp_expiry >= now)
+        # Guesses against a real, issued code count on the account. Anything else (unknown email, no
+        # code) counts on the caller's address, so a stranger can't use up the owner's daily quota.
+        subject = attempts.subject_for(user, email) if active else f"ip:{ip}"
         attempt = attempts.begin(LoginAttempt.OTP, subject, email, ip, now)
 
         day = now - timedelta(days=1)
         if (attempts.failures(LoginAttempt.OTP, subject, day) > cfg.get('OTP_MAX_FAILURES_PER_DAY', 10)
                 or attempts.ip_spraying(LoginAttempt.OTP, ip, subject, day, cfg.get('OTP_MAX_ACCOUNTS_PER_IP', 10))):
+            attempts.discard(attempt)
             return {"error": "Too many attempts. Please try again tomorrow or contact support."}, 429
 
-        if not user or not user.reset_otp or not user.reset_otp_expiry or user.reset_otp_expiry < now:
+        if not active:
             hmac.compare_digest("000000", otp)          # same work either way
             return bad
         issued = user.reset_otp_expiry - OTP_TTL

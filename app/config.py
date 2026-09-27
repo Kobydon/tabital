@@ -40,6 +40,7 @@ class Config:
     OTP_MAX_FAILURES_PER_DAY = int(os.getenv("OTP_MAX_FAILURES_PER_DAY", "10"))     # reset codes, per account
     OTP_MAX_ACCOUNTS_PER_IP = int(os.getenv("OTP_MAX_ACCOUNTS_PER_IP", "10"))
     SIGNUP_MAX_FAILURES_PER_IP = int(os.getenv("SIGNUP_MAX_FAILURES_PER_IP", "10"))  # per window
+    RESET_REQUESTS_PER_IP_PER_HOUR = int(os.getenv("RESET_REQUESTS_PER_IP_PER_HOUR", "10"))
     # X-Forwarded-For hops added by our own proxies. Render: 1. Set 0 if nothing sits in front of the
     # app, or clients could pick their own IP address.
     TRUSTED_PROXY_COUNT = int(os.getenv("TRUSTED_PROXY_COUNT", "1"))

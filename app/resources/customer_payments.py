@@ -119,7 +119,8 @@ class CustomerGetPaymentStatsResource(Resource):
             InstalmentPlan.customer_id == current_customer.id
         ).all()
         
-        total_paid = sum(p.amount for p in payments if p.status == 'paid')
+        total_paid = sum(float(p.paid_amount or p.amount) for p in payments if p.status == 'paid') + \
+            sum(float(p.part_paid()) for p in payments if p.status != 'paid')      # part payments count
         total_late_fees_paid = sum(p.late_fee for p in payments if p.late_fee_paid)
         total_late_fees_unpaid = sum(p.late_fee for p in payments if not p.late_fee_paid and p.late_fee > 0)
         
@@ -188,7 +189,7 @@ class CustomerDownloadReceiptResource(Resource):
         y -= 15
         c.drawString(50, y, f"Payment Date: {payment.paid_date.strftime('%Y-%m-%d') if payment.paid_date else 'N/A'}")
         y -= 15
-        c.drawString(50, y, f"Amount Paid: GHS {payment.amount:.2f}")
+        c.drawString(50, y, f"Amount Paid: GHS {float(payment.paid_amount or payment.amount):.2f}")
         y -= 15
         c.drawString(50, y, f"Payment Method: {payment.payment_method or 'N/A'}")
         y -= 15
@@ -295,14 +296,21 @@ class CustomerMakePaymentResource(Resource):
         if not next_payment:
             return {"error": "No payments due on this plan"}, 400
 
-        next_payment.status = 'pending_verification'
-        next_payment.payment_method = payment_method
-        next_payment.payment_reference = payment_reference
+        # Only a claim: the instalment itself doesn't change until Tabital confirms the money
+        # arrived (collections -> payment claims). Late fees and reminders carry on meanwhile.
+        from ..models.payment_claim import PaymentClaim
+        if PaymentClaim.query.filter_by(payment_id=next_payment.id, status=PaymentClaim.PENDING).first():
+            return {"error": "We're already checking a payment you told us about for this instalment."}, 409
+        claim = PaymentClaim(payment_id=next_payment.id, plan_id=plan.id, customer_id=current_customer.id,
+                             method=payment_method, reference=payment_reference[:100])
+        db.session.add(claim)
         db.session.commit()
 
         return {
-            "message": "Payment submitted. We'll confirm it once the money is received.",
+            "message": "Thanks. We'll check the payment and update your plan once the money is received. "
+                       "Until then the instalment still shows as due.",
             "payment_id": next_payment.payment_id,
+            "claim_id": claim.id,
             "status": next_payment.status,
             "amount_due": next_payment.get_total_due()
         }, 202
@@ -367,7 +375,7 @@ class CustomerPaidPaymentsResource(Resource):
                 "plan_name": plan.plan_name if plan else "",
                 "merchant_name": merchant.business_name or merchant.full_name if merchant else "",
                 "installment_number": payment.installment_number,
-                "amount": payment.amount,
+                "amount": payment.paid_amount or payment.amount,
                 "payment_method": payment.payment_method or "",
                 "payment_reference": payment.payment_reference or "",
                 "status": payment.status,

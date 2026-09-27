@@ -16,6 +16,7 @@ from .models import deferment as _deferment_model  # noqa: F401
 from .models import pii_access as _pii_access_model  # noqa: F401
 from .models import login_attempt as _login_attempt_model  # noqa: F401
 from .models import part_payment as _part_payment_model  # noqa: F401
+from .models import payment_claim as _payment_claim_model  # noqa: F401
 from .routes import register_routes
 
 
@@ -165,6 +166,7 @@ def register_commands(app):
         from .models.transaction import Transaction
 
         created = 0
+        no_fee = []
         for plan in InstalmentPlan.query.order_by(InstalmentPlan.id).all():
             if ledger.has_entries(plan):
                 continue
@@ -179,6 +181,8 @@ def register_commands(app):
                               note="Backfill: merchant discount (MDR)", at=opened)
                 ledger.record(plan, LedgerEntry.MERCHANT_PAYABLE, sale.payout_amount, account=LedgerEntry.MERCHANT,
                               note="Backfill: settlement owed to merchant", at=opened)
+            else:
+                no_fee.append(plan.id)
             payments = InstalmentPayment.query.filter_by(plan_id=plan.id).all()
             for p in payments:
                 if p.late_fee and (p.late_fee_paid or p.status != 'paid'):
@@ -190,6 +194,10 @@ def register_commands(app):
                                   reference=p.payment_reference or "backfill",
                                   note=f"Backfill: payment {p.installment_number}", at=p.paid_date or p.due_date)
             created += 1
+        if no_fee:
+            click.echo(f"{len(no_fee)} plan(s) had no stored merchant payout, so no merchant fee was written "
+                       f"(plan ids: {', '.join(map(str, no_fee[:50]))}{'…' if len(no_fee) > 50 else ''}). "
+                       "Their merchant fees are missing from revenue until entered by hand.")
         if dry_run:
             db.session.rollback()
             click.echo(f"Dry run: would backfill {created} plan(s)")

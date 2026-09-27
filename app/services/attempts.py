@@ -56,6 +56,12 @@ def succeed(row):
     db.session.commit()
 
 
+def discard(row):
+    """Forget an attempt that was refused before anything was checked."""
+    db.session.delete(row)
+    db.session.commit()
+
+
 def failures(kind, subject, since) -> int:
     """Failures for this account since `since`, or since its last success / unlock if later."""
     last_ok = db.session.query(db.func.max(LoginAttempt.created_at)).filter(

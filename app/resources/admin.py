@@ -1,3 +1,4 @@
+from decimal import ROUND_HALF_UP
 from ..services import pii
 from ..services import merchant_fees
 from flask import json
@@ -123,10 +124,9 @@ def _recheck_identity(user, changed):
 
 
 def _deactivate(user):
-    """Accounts are never deleted: money, KYC, fraud and audit records must stay. Suspending stops
-    sign-in and new purchases; plans and settlements carry on."""
-    user.status = 'suspended'
-    db.session.commit()
+    """Suspend, never delete (services/accounts.py). Refused while money is still owed."""
+    from ..services import accounts
+    accounts.deactivate(user)
 
 class CustomerResource(Resource):
     @auth_required
@@ -173,7 +173,10 @@ class CustomerResource(Resource):
         if not user or user.role != "customer":
             return {"error": "Customer not found"}, 404
         name = user.full_name or user.business_name or user.phone
-        _deactivate(user)
+        try:
+            _deactivate(user)
+        except ValueError as e:
+            return {"error": str(e)}, 409
         return {"message": f"Customer {name} deactivated. Their records are kept.", "status": user.status}
 
 
@@ -286,7 +289,10 @@ class MerchantResource(Resource):
         if not m or m.role != "merchant":
             return {"error": "Merchant not found"}, 404
         name = m.business_name or m.owner_name or m.phone
-        _deactivate(m)
+        try:
+            _deactivate(m)
+        except ValueError as e:
+            return {"error": str(e)}, 409
         return {"message": f"Merchant {name} deactivated. Their records are kept.", "status": m.status}
 
 
@@ -640,7 +646,7 @@ class AdminApproveOrderResource(Resource):
         from ..services import merchant_fees
         fee_tier = merchant_fees.tier_of(order.merchant)
         mdr = merchant_fees.rate_for(order.merchant)
-        commission_amount = (product_value * mdr).quantize(plan_engine.CENT)
+        commission_amount = (product_value * mdr).quantize(plan_engine.CENT, ROUND_HALF_UP)   # §5.5
         fee_note = f"Merchant discount (MDR) {mdr * 100:.2f}% ({merchant_fees.TIERS[fee_tier][2]} tier)"
         payout_amount = float(product_value - commission_amount)
         

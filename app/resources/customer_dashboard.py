@@ -47,7 +47,7 @@ class CustomerDashboardStatsResource(Resource):
             InstalmentPayment.due_date >= datetime.now()
         ).order_by(InstalmentPayment.due_date.asc()).first()
         
-        next_payment_amount = next_payment.amount if next_payment else 0
+        next_payment_amount = next_payment.get_total_due() if next_payment else 0     # what's still owed
         next_payment_date = next_payment.due_date.isoformat() if next_payment else ""
         next_payment_plan_name = next_payment.plan.plan_name if next_payment else ""
         
@@ -61,7 +61,7 @@ class CustomerDashboardStatsResource(Resource):
             InstalmentPayment.paid_date >= year_start
         ).all()
         
-        paid_to_date = sum(p.amount for p in paid_payments)
+        paid_to_date = _received(current_customer.id, year_start)      # ledger: includes part payments
         
         # Account status
         account_status = 'good_standing'
@@ -142,7 +142,7 @@ class CustomerPaymentOverviewResource(Resource):
                 InstalmentPayment.paid_date < next_month
             ).all()
             
-            paid_amount = sum(p.amount for p in paid_payments)
+            paid_amount = _received(current_customer.id, month_start, next_month)
             
             # Get pending payments due this month
             pending_payments = InstalmentPayment.query.join(
@@ -154,7 +154,7 @@ class CustomerPaymentOverviewResource(Resource):
                 InstalmentPayment.due_date < next_month
             ).all()
             
-            pending_amount = sum(p.amount for p in pending_payments)
+            pending_amount = sum(p.get_total_due() for p in pending_payments)
             
             # Only add months that have data or are recent months
             # Use consistent month format without year for chart
@@ -210,7 +210,7 @@ class CustomerUpcomingPaymentsResource(Resource):
                 "instalment_frequency": safe_str(plan.frequency),
                 "instalment_amount": safe_float(plan.installment_amount),
                 "next_payment_date": payment.due_date.isoformat() if payment.due_date else "",
-                "next_payment_amount": safe_float(payment.amount),
+                "next_payment_amount": safe_float(payment.get_total_due()),
                 "due_date": payment.due_date.isoformat() if payment.due_date else "",
                 "status": safe_str(plan.status),
                 "created_at": plan.created_at.isoformat() if plan.created_at else ""
@@ -247,7 +247,7 @@ class CustomerRecentTransactionsResource(Resource):
                 "merchant_name": safe_str(plan.merchant.business_name or plan.merchant.full_name),
                 "product_name": safe_str(plan.plan_name),
                 "product_description": safe_str(plan.description),
-                "amount": safe_float(payment.amount),
+                "amount": safe_float(payment.paid_amount or payment.amount),
                 "payment_method": safe_str(payment.payment_method),
                 "payment_plan": "Instalment",
                 "status": "completed",
@@ -305,7 +305,7 @@ class CustomerInstalmentsResource(Resource):
                 "instalment_frequency": safe_str(plan.frequency),
                 "instalment_amount": safe_float(plan.installment_amount),
                 "next_payment_date": next_payment.due_date.isoformat() if next_payment else "",
-                "next_payment_amount": safe_float(next_payment.amount) if next_payment else 0,
+                "next_payment_amount": safe_float(next_payment.get_total_due()) if next_payment else 0,
                 "due_date": plan.end_date.isoformat() if plan.end_date else "",
                 "status": safe_str(plan.status),
                 "created_at": plan.created_at.isoformat() if plan.created_at else "",
@@ -320,6 +320,21 @@ class CustomerInstalmentsResource(Resource):
         }
 
 
+
+def _received(customer_id, start=None, end=None):
+    """Money the customer actually paid (ledger PAYMENT_RECEIVED, part payments included), in GHS."""
+    from ..models.ledger import LedgerEntry
+    from ..services import ledger
+    q = db.session.query(db.func.coalesce(db.func.sum(LedgerEntry.amount_pesewas), 0))\
+        .join(InstalmentPlan, InstalmentPlan.id == LedgerEntry.plan_id)\
+        .filter(InstalmentPlan.customer_id == customer_id, LedgerEntry.entry_type == LedgerEntry.PAYMENT_RECEIVED)
+    if start is not None:
+        q = q.filter(LedgerEntry.created_at >= start)
+    if end is not None:
+        q = q.filter(LedgerEntry.created_at < end)
+    return float(-ledger.to_cedis(q.scalar()))
+
+
 def _schedule(plan, payments=None):
     """A plan's payments for the customer, including any unpaid late fee and the total now due."""
     if payments is None:
@@ -328,6 +343,7 @@ def _schedule(plan, payments=None):
     rows = []
     for p in payments:
         unpaid_fee = safe_float(p.late_fee) if p.late_fee and not p.late_fee_paid and p.status != 'paid' else 0.0
+        part_paid = float(p.part_paid()) if p.status != 'paid' else 0.0
         rows.append({
             "id": p.id,
             "installment_number": p.installment_number,
@@ -336,7 +352,11 @@ def _schedule(plan, payments=None):
             "original_due_date": p.original_due_date.isoformat() if p.original_due_date else None,
             "amount": safe_float(p.amount),
             "late_fee": unpaid_fee,
-            "amount_due": round(safe_float(p.amount) + unpaid_fee, 2) if p.status != 'paid' else 0.0,
+            # What's still owed now (instalment + unpaid late fee - part payments already received)
+            "amount_due": safe_float(p.get_total_due()) if p.status != 'paid' else 0.0,
+            "part_paid": part_paid,
+            "part_payments": [{"amount": pp.amount_pesewas / 100, "at": pp.created_at.isoformat()}
+                              for pp in p.part_payments()] if part_paid else [],
             "status": safe_str(p.status),
             "paid_date": p.paid_date.isoformat() if p.paid_date else "",
             "payment_reference": safe_str(p.payment_reference),

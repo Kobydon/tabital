@@ -102,7 +102,10 @@ def test_changes_are_saved_audited_and_used(env):
     assert SystemSetting.get_value("autopay_retry_days", None) == [0, 2, 5]
     quote = c.post("/installment/calculate", headers=env["cust_h"],
                    json={"product_price": 4000, "number_of_installments": 4}).get_json()
-    assert quote["fees"]["merchant_fee_amount"] == 320
+    assert "merchant" not in quote                                  # customers never see merchant figures
+    admin_quote = c.post("/installment/calculate", headers=h,
+                         json={"product_price": 4000, "number_of_installments": 4}).get_json()
+    assert admin_quote["merchant"]["fee_amount"] == 320
     # Audit trail
     hist = c.get("/admin/business-settings/history", headers=h).get_json()["changes"]
     assert len(hist) == 3 and all(x["by"] == "Ops Admin" for x in hist)
