@@ -19,7 +19,7 @@ branches are stacked on top of it, each one containing the one before. Nothing i
 |---|---|---|
 | `main` = `origin/main` | `b25c78c` (2026-06-09) | `bc298cd` (2026-06-09) |
 | Current branch | `phase7-unit-economics` (`0b7d26b`) | `phase7-unit-economics` (`82b5909`) |
-| Commits to push (`main..phase7-unit-economics`) | **39** | **28** |
+| Commits to push (`main..phase7-unit-economics`) | **42** | **29** |
 | Uncommitted changes / stashes | none | none |
 | Merge commits in the new work | none | none |
 
@@ -35,7 +35,7 @@ New commits on each branch (compared with the branch before it):
 | `phase5-settlements` | 2 | 1 |
 | `phase6-identity-fraud` | 2 | 1 |
 | `phase6b-deferment` | 1 | 1 |
-| `phase7-unit-economics` | 17 | 18 |
+| `phase7-unit-economics` | 20 | 19 |
 
 - Every branch is a descendant of the one before it, and of `main`. None is behind.
 - So `main` **can be fast-forwarded** to `phase7-unit-economics`: no merge is needed, and every
@@ -85,7 +85,7 @@ You have two options.
 by a marker. What that involves:
 
 - **Every commit hash changes** from the first bad commit (2026-05-05) onward. That's almost all of
-  `main`'s history and all 39 new commits.
+  `main`'s history and all 42 new commits.
 - **GitHub `main` has to be force-pushed**, and branch protection (if any) must allow it. Render
   deploys from `main`, so the force-push can start a deploy (see section e).
 - **Everyone who has a copy has to re-clone.** Old clones can't be pulled into the new history.
@@ -145,7 +145,7 @@ for ($i = 1; $i -lt $branches.Count; $i++) {
     $ok = if ($LASTEXITCODE -eq 0) { "OK" } else { "NOT STACKED" }
     "{0} -> {1}: {2}" -f $branches[$i-1], $branches[$i], $ok
 }
-git rev-list --count origin/main..phase7-unit-economics      # tabital 39, tabital_front 28
+git rev-list --count origin/main..phase7-unit-economics      # tabital 42, tabital_front 29
 ```
 
 Every line must say `OK`.
@@ -231,7 +231,7 @@ Don't push `main` here. Then open the pull request in the browser:
 - https://github.com/Kobydon/tabital/compare/main...phase7-unit-economics
 - https://github.com/Kobydon/tabital_front/compare/main...phase7-unit-economics
 
-It should list 39 commits (`tabital`) and 28 commits (`tabital_front`).
+It should list 42 commits (`tabital`) and 29 commits (`tabital_front`).
 
 Opening a pull request per phase (each against the branch before it) also works, but it's nine pull
 requests per repo that must be merged in order. One pull request is simpler.
