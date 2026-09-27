@@ -347,11 +347,23 @@ class AdminMarkPaymentAsPaidResource(Resource):
         if payment.status == 'paid':
             return {"error": "Payment already paid"}, 400
 
-        payment_reference = payment_reference or payment.payment_reference
-        if not payment_reference:
-            return {"error": "Enter the MoMo/bank reference of the money received"}, 400
-
-        mark_instalment_paid(payment, payment_method, payment_reference, user=current_admin)
+        from app.services import payments
+        if payment.installment_number == 1 and payment.status == 'pending_verification':
+            # Verifying a down payment recorded without Paystack (its reference is already stored)
+            payment_reference = payment_reference or payment.payment_reference
+            if not payment_reference:
+                return {"error": "Enter the MoMo/bank reference of the money received"}, 400
+            if payment_reference != payment.payment_reference and payments.reference_in_use(payment_reference):
+                return {"error": "That reference has already been recorded"}, 400
+            mark_instalment_paid(payment, payment_method, payment_reference, user=current_admin)
+        else:
+            # Any other instalment: the same checks as collections (unique reference, part or full)
+            try:
+                payments.record_payment(payment, data.get('amount_received', payment.get_total_due()),
+                                        payment_method, payment_reference, user=current_admin)
+            except payments.PaymentError as e:
+                db.session.rollback()
+                return {"error": str(e)}, 400
         db.session.commit()
         
         return {

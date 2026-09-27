@@ -268,13 +268,21 @@ def facts_for(user, today=None) -> Facts:
     cured = 0
     counting = 0             # late payments that currently lower the limit/tier
     expired = 0
+    # A waived fee isn't a cleared late payment (D14): instalments with any waiver never count as cured
+    from ..extensions import db
+    from ..models.ledger import LedgerEntry
+    pay_ids = [p.id for p in payments if p.id is not None]
+    waived_ids = {pid for (pid,) in db.session.query(LedgerEntry.payment_id).filter(
+        LedgerEntry.entry_type == LedgerEntry.LATE_FEE_WAIVED, LedgerEntry.payment_id.in_(pay_ids)).distinct()} \
+        if pay_ids else set()
     for p in payments:
         if p.late_fee_applied_date is None or not p.due_date:
             continue
         due = p.due_date.date()
         if p.status == 'paid' and p.paid_date:
-            # Cured: paid within the window, and a late fee was charged and paid
-            if (p.paid_date.date() - due).days <= cure_days and p.late_fee_paid and p.late_fee:
+            # Cured: paid within the window, and a late fee was charged and paid (not waived)
+            if (p.paid_date.date() - due).days <= cure_days and p.late_fee_paid and p.late_fee \
+                    and p.id not in waived_ids:
                 cured += 1
                 cured_by_plan[p.plan_id] = cured_by_plan.get(p.plan_id, 0) + 1
                 continue

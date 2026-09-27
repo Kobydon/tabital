@@ -62,15 +62,19 @@ def discard(row):
     db.session.commit()
 
 
-def failures(kind, subject, since) -> int:
-    """Failures for this account since `since`, or since its last success / unlock if later."""
+def failures(kind, subject, since, ip=None) -> int:
+    """Failures for this account since `since`, or since its last success / unlock if later.
+    With `ip`, only failures from that address (so a stranger can't use up the owner's allowance)."""
     last_ok = db.session.query(db.func.max(LoginAttempt.created_at)).filter(
         LoginAttempt.kind == kind, LoginAttempt.subject == subject, LoginAttempt.success.is_(True)).scalar()
     start = max(since, last_ok) if last_ok else since
     # ">=": clocks tick coarsely (about 16 ms on Windows), so an attempt can share its timestamp with
     # the boundary (e.g. the moment a reset code was issued); it must still count
-    return LoginAttempt.query.filter(LoginAttempt.kind == kind, LoginAttempt.subject == subject,
-                                     LoginAttempt.success.is_(False), LoginAttempt.created_at >= start).count()
+    q = LoginAttempt.query.filter(LoginAttempt.kind == kind, LoginAttempt.subject == subject,
+                                  LoginAttempt.success.is_(False), LoginAttempt.created_at >= start)
+    if ip is not None:
+        q = q.filter(LoginAttempt.ip == (ip or None))
+    return q.count()
 
 
 def ip_spraying(kind, ip, subject, since, limit) -> bool:

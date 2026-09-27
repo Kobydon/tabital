@@ -99,6 +99,8 @@ class AdminGetCustomersResource(Resource):
         kyc_status = request.args.get('kyc_status', '', type=str)
         status = request.args.get('status', '', type=str)
         sort_by = request.args.get('sort_by', 'created_at', type=str)
+        if sort_by not in ('created_at', 'full_name', 'business_name', 'customer_id', 'merchant_id', 'status', 'kyc_status', 'city'):   # never sort by an arbitrary column
+            sort_by = 'created_at'
         sort_order = request.args.get('sort_order', 'desc', type=str)
         
         # Build query
@@ -162,7 +164,7 @@ class AdminGetCustomersResource(Resource):
                 "risk_level": risk_level,
                 "credit_limit": credit_limit,
                 "outstanding": float(outstanding),
-                "status": customer.status if customer.status in ['active', 'approved'] else 'pending',
+                "status": customer.status or 'pending',          # the real status (restricted, suspended...)
                 "total_financed": float(total_financed),
                 "total_paid": float(total_paid),
                 "active_plans": active_plans,
@@ -382,12 +384,10 @@ class AdminUpdateCustomerStatusResource(Resource):
         customer = User.query.filter_by(id=customer_id, role='customer').first()
         if not customer:
             return {"error": "Customer not found"}, 404
-        if new_status == 'suspended':
-            # A suspended account can't sign in, so it mustn't still owe or be owed money
-            from ..services import accounts
-            reason_blocked = accounts.deactivation_blocker(customer)
-            if reason_blocked:
-                return {"error": reason_blocked + " Use 'restricted' to stop new purchases meanwhile."}, 409
+        from ..services import accounts
+        blocked = accounts.status_change_error(customer, new_status)
+        if blocked:
+            return {"error": blocked}, 409
         if len((reason or '').strip()) < 5:
             return {"error": "Give a reason (at least 5 characters). It's kept with the change."}, 400
         _log_status_change(customer, new_status, reason, current_admin)      # before: it records the old status

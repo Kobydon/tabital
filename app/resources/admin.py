@@ -49,7 +49,10 @@ class ApproveUserResource(Resource):
             except merchant_fees.FeeTierError as e:
                 db.session.rollback()
                 return {"error": str(e)}, 400
-        user.status = "approved"
+        from ..services import accounts
+        if user.status in ("restricted", "suspended"):
+            return {"error": "This account is restricted or suspended; reinstate it with a status change."}, 400
+        accounts.approve_after_checks(user)
         if user.role == "customer" and not user.customer_id:
             user.customer_id = user.generate_customer_id()
         elif user.role == "merchant" and not user.merchant_id:
@@ -68,6 +71,10 @@ class RejectUserResource(Resource):
         user = User.query.get(user_id)
         if not user:
             return {"error": "User not found"}, 404
+        from ..services import accounts
+        blocked = accounts.status_change_error(user, "rejected")
+        if blocked:
+            return {"error": blocked}, 409
         user.status = "rejected"
         db.session.commit()
         return {"message": "User rejected"}

@@ -108,6 +108,8 @@ class AdminGetMerchantsResource(Resource):
         status = request.args.get('status', '', type=str)
         risk_level = request.args.get('risk_level', '', type=str)
         sort_by = request.args.get('sort_by', 'created_at', type=str)
+        if sort_by not in ('created_at', 'full_name', 'business_name', 'customer_id', 'merchant_id', 'status', 'kyc_status', 'city'):   # never sort by an arbitrary column
+            sort_by = 'created_at'
         sort_order = request.args.get('sort_order', 'desc', type=str)
         
         # Build query
@@ -176,7 +178,7 @@ class AdminGetMerchantsResource(Resource):
                 "business_type": merchant.business_type or "N/A",
                 "kyc_status": merchant.kyc_status or "pending",
                 "risk_level": risk_level_calc,
-                "status": merchant.status if merchant.status in ['approved', 'active'] else 'pending',
+                "status": merchant.status or 'pending',
                 "total_gmv": float(total_gmv),
                 "total_transactions": total_transactions,
                 "active_plans": active_plans,
@@ -300,12 +302,10 @@ class AdminUpdateMerchantStatusResource(Resource):
         merchant = User.query.filter_by(id=merchant_id, role='merchant').first()
         if not merchant:
             return {"error": "Merchant not found"}, 404
-        if new_status == 'suspended':
-            # A suspended account can't sign in, so it mustn't still owe or be owed money
-            from ..services import accounts
-            reason_blocked = accounts.deactivation_blocker(merchant)
-            if reason_blocked:
-                return {"error": reason_blocked + " Use 'restricted' to stop new sales meanwhile."}, 409
+        from ..services import accounts
+        blocked = accounts.status_change_error(merchant, new_status)
+        if blocked:
+            return {"error": blocked}, 409
         if len((reason or '').strip()) < 5:
             return {"error": "Give a reason (at least 5 characters). It's kept with the change."}, 400
         from .admin_customers import _log_status_change

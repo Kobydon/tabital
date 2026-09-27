@@ -275,7 +275,8 @@ class AdminApproveKYCResource(Resource):
             merchant.kyc_completed_on = datetime.now()
             
             # IMPORTANT: Update the user status from 'pending' to 'approved'
-            merchant.status = 'approved'
+            from ..services import accounts as _accounts
+            _accounts.approve_after_checks(merchant)   # never lifts a restriction
             
             db.session.commit()
             
@@ -469,7 +470,8 @@ class AdminApproveDocumentResource(Resource):
                     merchant.verification_level = 'verified'
                     merchant.kyc_completed_on = datetime.now()
                     # Update user status to approved when all documents are verified
-                    merchant.status = 'approved'
+                    from ..services import accounts as _accounts
+                    _accounts.approve_after_checks(merchant)   # never lifts a restriction
                     
                     db.session.commit()
                     

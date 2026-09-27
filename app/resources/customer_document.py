@@ -529,7 +529,8 @@ class AdminApproveCustomerKYCResource(Resource):
             customer.kyc_status = 'verified'
             customer.verification_level = 'verified'
             customer.kyc_completed_on = datetime.now()
-            customer.status = 'approved'
+            from ..services import accounts as _accounts
+            _accounts.approve_after_checks(customer)   # never lifts a restriction
 
             # Underwriting: decide tier and limit now that identity is verified (Phase 3)
             from ..services import risk
@@ -625,7 +626,8 @@ class AdminApproveCustomerDocumentResource(Resource):
                     customer.kyc_status = 'verified'
                     customer.verification_level = 'verified'
                     customer.kyc_completed_on = datetime.now()
-                    customer.status = 'approved'
+                    from ..services import accounts as _accounts
+                    _accounts.approve_after_checks(customer)   # never lifts a restriction
                     from ..services import risk
                     from ..models.risk_assessment import RiskAssessment
                     risk.evaluate(customer, RiskAssessment.KYC_APPROVAL, created_by=current_admin)

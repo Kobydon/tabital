@@ -194,6 +194,14 @@ class ForgotPasswordResource(Resource):
         # Throttle: one code per minute
         if user.reset_otp_expiry and user.reset_otp_expiry - OTP_TTL + OTP_RESEND_AFTER > now:
             return _generic_reset_response()
+        # At most RESET_CODES_PER_ACCOUNT_PER_DAY codes a day for one account: with 5 guesses per code
+        # that bounds guessing from many addresses (the owner is emailed every code, so it's visible)
+        issued_today = LoginAttempt.query.filter(LoginAttempt.kind == LoginAttempt.RESET,
+                                                 LoginAttempt.subject == attempts.subject_for(user, email),
+                                                 LoginAttempt.created_at >= now - timedelta(days=1)).count()
+        if issued_today >= current_app.config.get('RESET_CODES_PER_ACCOUNT_PER_DAY', 20):
+            return _generic_reset_response()
+        attempts.begin(LoginAttempt.RESET, attempts.subject_for(user, email), email, ip, now)
 
         otp = f"{secrets.randbelow(1_000_000):06d}"
         user.reset_otp = otp
@@ -337,7 +345,9 @@ class VerifyResetOTPResource(Resource):
         attempt = attempts.begin(LoginAttempt.OTP, subject, email, ip, now)
 
         day = now - timedelta(days=1)
-        if (attempts.failures(LoginAttempt.OTP, subject, day) > cfg.get('OTP_MAX_FAILURES_PER_DAY', 10)
+        # Daily cap per (account, address): a stranger using up their own allowance doesn't lock the
+        # owner out. Guessing one code from many addresses is stopped by the per-code limit below.
+        if (attempts.failures(LoginAttempt.OTP, subject, day, ip=ip) > cfg.get('OTP_MAX_FAILURES_PER_DAY', 10)
                 or attempts.ip_spraying(LoginAttempt.OTP, ip, subject, day, cfg.get('OTP_MAX_ACCOUNTS_PER_IP', 10))):
             attempts.discard(attempt)
             return {"error": "Too many attempts. Please try again tomorrow or contact support."}, 429
