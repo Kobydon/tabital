@@ -1,4 +1,5 @@
 from flask_restful import Resource, request
+from ..services import merchant_fees
 from flask_praetorian import auth_required, current_user
 from app.models.user import User
 from app.models.instalment import InstalmentPlan
@@ -77,10 +78,12 @@ class AdminGetAllUsersResource(Resource):
         status = request.args.get('status', '', type=str)
         kyc_status = request.args.get('kyc_status', '', type=str)
         sort_by = request.args.get('sort_by', 'created_at', type=str)
+        if sort_by not in ('created_at', 'full_name', 'business_name', 'customer_id', 'merchant_id', 'status', 'kyc_status', 'city'):   # never sort by an arbitrary column
+            sort_by = 'created_at'
         sort_order = request.args.get('sort_order', 'desc', type=str)
         
         # Build query
-        query = User.query
+        query = User.query.filter(User.role != 'admin')   # admins: Team and access
         
         # Apply search filter
         if search:
@@ -166,6 +169,10 @@ class AdminGetUserDetailResource(Resource):
         if not user:
             return {"error": "User not found"}, 404
         
+        if user.role == 'admin':
+        
+            return {"error": "Admins are managed on Settings > Team and access."}, 403
+        
         # Get user metrics based on role
         user_data = {
             "id": user.id,
@@ -207,7 +214,7 @@ class AdminGetUserDetailResource(Resource):
                 "total_products": user.total_products,
                 "total_sales": user.total_sales,
                 "rating": user.rating,
-                "commission_rate": user.commission_rate,
+                "commission_rate": merchant_fees.describe(user)["fee_percentage"] if user.role == "merchant" else None,
                 "pending_payout": user.pending_payout
             })
         
@@ -234,6 +241,18 @@ class AdminUpdateUserStatusResource(Resource):
         if not user:
             return {"error": "User not found"}, 404
         
+        if user.role == 'admin':
+        
+            return {"error": "Admins are managed on Settings > Team and access."}, 403
+        if len((reason or '').strip()) < 5:
+            return {"error": "Give a reason (at least 5 characters). It's kept with the change."}, 400
+        from ..services import accounts
+        blocked = accounts.status_change_error(user, new_status)
+        if blocked:
+            return {"error": blocked}, 409
+
+        from .admin_customers import _log_status_change
+        _log_status_change(user, new_status, reason, current_admin)
         old_status = user.status
         user.status = new_status
         
@@ -259,11 +278,17 @@ class AdminDeleteUserResource(Resource):
         if not user:
             return {"error": "User not found"}, 404
         
-        # Soft delete - set status to suspended
-        user.status = 'suspended'
+        if user.role == 'admin':
         
-        db.session.commit()
+            return {"error": "Admins are managed on Settings > Team and access."}, 403
         
+        # Suspend, never delete; refused while money is still owed (services/accounts.py)
+        from ..services import accounts
+        try:
+            accounts.deactivate(user)
+        except ValueError as e:
+            return {"error": str(e)}, 409
+
         return {
             "message": f"User {user_id} has been deactivated",
             "user_id": user.id,
@@ -285,7 +310,7 @@ class AdminExportUsersResource(Resource):
         status = request.args.get('status', '', type=str)
         
         # Build query
-        query = User.query
+        query = User.query.filter(User.role != 'admin')   # admins: Team and access
         
         if role:
             query = query.filter(User.role == role)

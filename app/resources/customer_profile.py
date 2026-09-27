@@ -45,9 +45,16 @@ class CustomerUpdateProfileResource(Resource):
         if current_customer.role != "customer":
             return {"error": "Unauthorized"}, 403
         
-        data = request.get_json()
-        
-        allowed_fields = ['full_name', 'business_name', 'email', 'city', 'address', 'gps', 'income_range']
+        data = request.get_json() or {}
+
+        # The verified name is the one on the Ghana Card (Phase 6): it can't be edited afterwards
+        if current_customer.kyc_status == 'verified' and 'full_name' in data \
+                and (data['full_name'] or '').strip() != (current_customer.full_name or '').strip():
+            return {"error": "Your name is verified against your Ghana Card. Contact support to change it.",
+                    "field": "full_name"}, 409
+
+        # income_range feeds underwriting, so it can only change through re-verification
+        allowed_fields = ['full_name', 'business_name', 'email', 'city', 'address', 'gps']
         
         for field in allowed_fields:
             if field in data:
@@ -67,28 +74,10 @@ class CustomerUpdatePasswordResource(Resource):
         if current_customer.role != "customer":
             return {"error": "Unauthorized"}, 403
         
-        data = request.get_json()
-        current_password = data.get('current_password')
-        new_password = data.get('new_password')
-        
-        if not current_password or not new_password:
-            return {"error": "Current password and new password are required"}, 400
-        
-        # Verify current password
-        from flask_praetorian import Praetorian
-        guard = Praetorian()
-        
-        if not guard.authenticate(current_customer.phone, current_password):
-            return {"error": "Current password is incorrect"}, 401
-        
-        if len(new_password) < 6:
-            return {"error": "New password must be at least 6 characters"}, 400
-        
-        # Update password
-        current_customer.password = guard.encrypt_password(new_password)
-        db.session.commit()
-        
-        return {"message": "Password updated successfully"}, 200
+        from ..services.auth_service import change_password
+
+        data = request.get_json() or {}
+        return change_password(current_customer, data.get('current_password'), data.get('new_password'))
 
 
 class CustomerGetKYCStatusResource(Resource):

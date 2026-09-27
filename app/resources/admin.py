@@ -1,3 +1,6 @@
+from decimal import ROUND_HALF_UP
+from ..services import pii
+from ..services import merchant_fees
 from flask import json
 from flask_restful import Resource, request
 from flask_praetorian import auth_required, current_user
@@ -38,7 +41,20 @@ class ApproveUserResource(Resource):
         user = User.query.get(user_id)
         if not user:
             return {"error": "User not found"}, 404
-        user.status = "approved"
+        if user.role == "merchant":
+            # Optional merchant fee tier chosen by management at onboarding (§6.1)
+            from ..services import merchant_fees
+            try:
+                merchant_fees.apply_at_approval(user, request.get_json(silent=True) or {}, current_user())
+            except merchant_fees.FeeTierError as e:
+                db.session.rollback()
+                return {"error": str(e)}, 400
+        from ..services import accounts
+        if user.status in ("restricted", "suspended"):
+            return {"error": "This account is restricted or suspended; reinstate it with a status change."}, 400
+        if user.role == "merchant" and user.kyc_status != "verified":
+            return {"error": "Merchants are approved through Merchant KYB, once their documents are checked."}, 400
+        accounts.approve_after_checks(user)
         if user.role == "customer" and not user.customer_id:
             user.customer_id = user.generate_customer_id()
         elif user.role == "merchant" and not user.merchant_id:
@@ -57,6 +73,10 @@ class RejectUserResource(Resource):
         user = User.query.get(user_id)
         if not user:
             return {"error": "User not found"}, 404
+        from ..services import accounts
+        blocked = accounts.status_change_error(user, "rejected")
+        if blocked:
+            return {"error": blocked}, 409
         user.status = "rejected"
         db.session.commit()
         return {"message": "User rejected"}
@@ -83,9 +103,49 @@ class GetCustomersResource(Resource):
         } for u in users]
 
 
+
+IDENTITY_FIELDS = ('national_id', 'phone', 'momo_number', 'business_phone')
+
+
+def _apply_fields(user, data, allowed):
+    """Set the allowed fields; never save a masked value. Returns True if an identity field changed."""
+    changed = False
+    for field in allowed:
+        if field in data and data[field] is not None and not pii.is_masked(data[field]):
+            if field in IDENTITY_FIELDS and getattr(user, field) != data[field]:
+                changed = True
+            setattr(user, field, data[field])
+    return changed
+
+
+def _recheck_identity(user, changed):
+    """A new Ghana Card or phone number gets the same duplicate checks as sign-up (§9A, §9D)."""
+    if not changed:
+        return
+    from ..services import fraud
+    try:
+        fraud.check_duplicates(user)
+        db.session.commit()
+    except Exception:                      # noqa: BLE001 (logged; the edit itself is saved)
+        db.session.rollback()
+        from flask import current_app
+        current_app.logger.exception("Fraud checks failed after an admin edit")
+
+
+def _deactivate(user):
+    """Suspend, never delete (services/accounts.py). Refused while money is still owed."""
+    from ..services import accounts
+    accounts.deactivate(user)
+
 class CustomerResource(Resource):
     @auth_required
     def get(self, customer_id):
+        # This route shares its address with AdminGetCustomerDetailResource and is matched first:
+        # GET answers with the current detail (customer + financial + activity), PUT/DELETE stay here
+        from .admin_customers import AdminGetCustomerDetailResource
+        return AdminGetCustomerDetailResource().get(customer_id)
+
+    def _legacy_get(self, customer_id):
         if current_user().role != "admin":
             return {"error": "Unauthorized"}, 403
         user = User.query.get(customer_id)
@@ -110,12 +170,14 @@ class CustomerResource(Resource):
         if not user or user.role != "customer":
             return {"error": "Customer not found"}, 404
         data = request.get_json()
-        allowed = ['full_name', 'business_name', 'phone', 'city', 'address', 'status',
+        # Status changes go through the approval / status endpoints (with a reason), not an edit
+        if 'status' in data:
+            return {"error": "Change the status with the approve / status actions, not an edit."}, 400
+        allowed = ['full_name', 'business_name', 'phone', 'city', 'address',
                    'payment_plan', 'income_range', 'national_id', 'gps', 'ref_name', 'ref_phone', 'ref_relationship']
-        for field in allowed:
-            if field in data and data[field] is not None:
-                setattr(user, field, data[field])
+        identity_changed = _apply_fields(user, data, allowed)
         db.session.commit()
+        _recheck_identity(user, identity_changed)
         return {"message": "Customer updated successfully"}
 
     @auth_required
@@ -126,9 +188,11 @@ class CustomerResource(Resource):
         if not user or user.role != "customer":
             return {"error": "Customer not found"}, 404
         name = user.full_name or user.business_name or user.phone
-        db.session.delete(user)
-        db.session.commit()
-        return {"message": f"Customer {name} deleted successfully"}
+        try:
+            _deactivate(user)
+        except ValueError as e:
+            return {"error": str(e)}, 409
+        return {"message": f"Customer {name} deactivated. Their records are kept.", "status": user.status}
 
 
 class GetMerchantsResource(Resource):
@@ -165,6 +229,12 @@ class GetMerchantsResource(Resource):
 class MerchantResource(Resource):
     @auth_required
     def get(self, merchant_id):
+        # Shares its address with AdminGetMerchantDetailResource and is matched first: GET answers with
+        # the current detail (merchant + financial + bank details + recent sales), PUT/DELETE stay here
+        from .admin_merchants import AdminGetMerchantDetailResource
+        return AdminGetMerchantDetailResource().get(merchant_id)
+
+    def _legacy_get(self, merchant_id):
         if current_user().role != "admin":
             return {"error": "Unauthorized"}, 403
         m = User.query.get(merchant_id)
@@ -195,7 +265,8 @@ class MerchantResource(Resource):
             "kyc_status": safe_str(getattr(m, 'kyc_status', '')),
             "verification_level": safe_str(getattr(m, 'verification_level', '')),
             "aml_screening": safe_str(getattr(m, 'aml_screening', '')),
-            "commission_rate": safe_float(getattr(m, 'commission_rate', 2.5)),
+            "commission_rate": merchant_fees.describe(m)["fee_percentage"],   # fee tier (§6.1)
+            **merchant_fees.describe(m),
             "pending_payout": safe_float(getattr(m, 'pending_payout', 0)),
             "next_settlement": safe_str(getattr(m, 'next_settlement', ''))
         }
@@ -207,17 +278,28 @@ class MerchantResource(Resource):
         m = User.query.get(merchant_id)
         if not m or m.role != "merchant":
             return {"error": "Merchant not found"}, 404
-        data = request.get_json()
-        allowed = ['full_name', 'business_name', 'owner_name', 'phone', 'city', 'address', 'status',
+        from .merchant_payouts import PAYOUT_FIELDS, PayoutError, apply_payout_details
+
+        data = request.get_json() or {}
+        # Status and verification go through KYB approval; sales figures come from the records
+        refused = [f for f in ('status', 'verified', 'total_sales', 'total_products', 'rating') if f in data]
+        if refused:
+            return {"error": f"These can't be edited here: {', '.join(refused)}. Use KYB approval / the status "
+                             "action; sales figures come from the records."}, 400
+        allowed = ['full_name', 'business_name', 'owner_name', 'phone', 'city', 'address',
                    'payment_plan', 'income_range', 'national_id', 'gps', 'product_type', 'has_shop',
                    'shop_url', 'years_in_business', 'offers_credit', 'price_range', 'payment_method',
-                   'momo_name', 'momo_number', 'bank_name', 'account_name', 'account_number',
                    'business_type', 'registration_number', 'tax_id', 'business_address', 'business_phone',
-                   'business_email', 'website', 'description', 'total_products', 'total_sales', 'rating', 'verified']
-        for field in allowed:
-            if field in data and data[field] is not None:
-                setattr(m, field, data[field])
+                   'business_email', 'website', 'description']
+        identity_changed = _apply_fields(m, data, allowed)
+        try:
+            apply_payout_details(m, {k: data[k] for k in PAYOUT_FIELDS if k in data and data[k] is not None},
+                                 by_admin=True)
+        except PayoutError as e:
+            db.session.rollback()
+            return {"error": str(e)}, 400
         db.session.commit()
+        _recheck_identity(m, identity_changed)
         return {"message": "Merchant updated successfully"}
 
     @auth_required
@@ -228,9 +310,11 @@ class MerchantResource(Resource):
         if not m or m.role != "merchant":
             return {"error": "Merchant not found"}, 404
         name = m.business_name or m.owner_name or m.phone
-        db.session.delete(m)
-        db.session.commit()
-        return {"message": f"Merchant {name} deleted successfully"}
+        try:
+            _deactivate(m)
+        except ValueError as e:
+            return {"error": str(e)}, 409
+        return {"message": f"Merchant {name} deactivated. Their records are kept.", "status": m.status}
 
 
 class MerchantStatsResource(Resource):
@@ -275,39 +359,23 @@ class MerchantStatsResource(Resource):
 
 
 class MerchantKYCResource(Resource):
+    """Turned off (go-live review): KYB is verified only by reviewing the merchant's documents on Merchant KYB; it can't be set by hand."""
+
     @auth_required
-    def put(self, merchant_id):
-        if current_user().role != "admin":
+    def put(self, *args, **kwargs):
+        if current_user().role != 'admin':
             return {"error": "Unauthorized"}, 403
-        m = User.query.get(merchant_id)
-        if not m or m.role != "merchant":
-            return {"error": "Merchant not found"}, 404
-        data = request.get_json()
-        if 'kyc_status' in data:
-            m.kyc_status = data['kyc_status']
-        if 'verification_level' in data:
-            m.verification_level = data['verification_level']
-        if 'aml_screening' in data:
-            m.aml_screening = data['aml_screening']
-        if data.get('kyc_status') == 'verified':
-            m.kyc_completed_on = datetime.utcnow()
-        db.session.commit()
-        return {"message": "KYC updated successfully"}
+        return {"error": "KYB is verified only by reviewing the merchant's documents on Merchant KYB; it can't be set by hand."}, 410
 
 
 class MerchantCommissionResource(Resource):
+    """Turned off (go-live review): Merchant fees are set with the merchant fee tier (PUT /admin/merchants/<id>/fee-tier)."""
+
     @auth_required
-    def put(self, merchant_id):
-        if current_user().role != "admin":
+    def put(self, *args, **kwargs):
+        if current_user().role != 'admin':
             return {"error": "Unauthorized"}, 403
-        m = User.query.get(merchant_id)
-        if not m or m.role != "merchant":
-            return {"error": "Merchant not found"}, 404
-        data = request.get_json()
-        if 'commission_rate' in data:
-            m.commission_rate = data['commission_rate']
-        db.session.commit()
-        return {"message": "Commission updated", "commission_rate": safe_float(m.commission_rate)}
+        return {"error": 'Merchant fees are set with the merchant fee tier (PUT /admin/merchants/<id>/fee-tier).'}, 410
 
 
 class MerchantSettlementResource(Resource):
@@ -318,17 +386,15 @@ class MerchantSettlementResource(Resource):
         m = User.query.get(merchant_id)
         if not m or m.role != "merchant":
             return {"error": "Merchant not found"}, 404
-        data = request.get_json()
-        if 'pending_payout' in data:
-            m.pending_payout = data['pending_payout']
-        if 'next_settlement' in data:
-            m.next_settlement = data['next_settlement']
-        if 'bank_name' in data:
-            m.bank_name = data['bank_name']
-        if 'account_name' in data:
-            m.account_name = data['account_name']
-        if 'account_number' in data:
-            m.account_number = data['account_number']
+        from .merchant_payouts import PayoutError, apply_payout_details
+
+        data = request.get_json() or {}
+        # pending_payout/next_settlement are no longer editable: they come from settlement batches
+        try:
+            apply_payout_details(m, {k: data[k] for k in ('bank_name', 'account_name', 'account_number') if k in data},
+                                 by_admin=True)
+        except PayoutError as e:
+            return {"error": str(e)}, 400
         db.session.commit()
         return {"message": "Settlement updated"}
 
@@ -341,9 +407,15 @@ class VerifyMerchantResource(Resource):
         m = User.query.get(merchant_id)
         if not m or m.role != "merchant":
             return {"error": "Merchant not found"}, 404
+        from ..services import merchant_fees
+        try:
+            merchant_fees.apply_at_approval(m, request.get_json(silent=True) or {}, current_user())
+        except merchant_fees.FeeTierError as e:
+            db.session.rollback()
+            return {"error": str(e)}, 400
         m.verified = True
         db.session.commit()
-        return {"message": "Merchant verified successfully"}
+        return {"message": "Merchant verified successfully", **merchant_fees.describe(m)}
 
 
 # Add these missing classes for bulk operations and search
@@ -355,13 +427,15 @@ class BulkUpdateCustomersResource(Resource):
         data = request.get_json()
         customer_ids = data.get('ids', [])
         update_data = data.get('data', {})
-        allowed_fields = ['status', 'payment_plan', 'income_range']
+        if 'status' in update_data:
+            return {"error": "Change statuses one at a time with the status action (it needs a reason)."}, 400
+        allowed_fields = ['payment_plan', 'income_range']
         updated_count = 0
         for customer_id in customer_ids:
             user = User.query.get(customer_id)
             if user and user.role == "customer":
                 for field in allowed_fields:
-                    if field in update_data:
+                    if field in update_data and not pii.is_masked(update_data[field]):
                         setattr(user, field, update_data[field])
                 updated_count += 1
         db.session.commit()
@@ -453,6 +527,7 @@ class GetCurrentUserResource(Resource):
 
             "phone": safe_str(user.phone),
             "role": safe_str(user.role),
+            "admin_level": (user.admin_level or 'operations') if user.role == 'admin' else None,
             "status": safe_str(user.status),
 
             "business_name": safe_str(user.business_name),
@@ -477,7 +552,7 @@ class GetCurrentUserResource(Resource):
             "kyc_status": safe_str(user.kyc_status),
             "verification_level": safe_str(user.verification_level),
 
-            "commission_rate": safe_float(user.commission_rate),
+            "commission_rate": merchant_fees.describe(user)["fee_percentage"] if user.role == "merchant" else None,
             "pending_payout": safe_float(user.pending_payout),
 
             "total_products": safe_int(user.total_products),
@@ -527,10 +602,6 @@ from ..models.instalment_payment import InstalmentPayment
 from ..extensions import db
 from datetime import datetime, timedelta
 import json
-import logging
-
-# Set up logging
-logging.basicConfig(level=logging.DEBUG)
 
 class AdminApproveOrderResource(Resource):
     @auth_required
@@ -545,60 +616,69 @@ class AdminApproveOrderResource(Resource):
         if not order:
             return {"error": "Order not found"}, 404
         
+        if order.status == 'awaiting_payment':
+            return {"error": "The customer hasn't paid the down payment yet"}, 400
         if order.status != 'pending':
             return {"error": f"Order already {order.status}"}, 400
-        
-        data = request.get_json()
-        
-        # Update order status
+
+        # Phase 6: an open block-level fraud flag on either side stops approval until it's reviewed
+        from ..services import fraud
+        for party in (order.customer, order.merchant):
+            if party and fraud.blocking_signals(party):
+                return {"error": f"Resolve the fraud flag on this {party.role} in Fraud review before approving"}, 409
+
+        data = request.get_json() or {}
+
+        # Order status is committed together with the plan, payments and transaction below
         order.status = 'approved'
         order.approved_at = datetime.now()
         order.admin_notes = data.get('admin_notes', '')
-        db.session.commit()
-        
-        print(f"Order {order.order_id} approved")
-        
+
+        from ..services import plan_engine
+        from ..models.system_settings import SystemSetting
+
         # Calculate dates
         start_date = datetime.now()
         end_date = start_date
         if order.number_of_installments > 1:
-            end_date = start_date + timedelta(days=30 * (order.number_of_installments - 1))
+            end_date = plan_engine.add_months(start_date, order.number_of_installments - 1)
+
+        # Balance still owed after Payment 1 (down payment + delivery fee) = financed balance FB
+        stored_schedule = json.loads(order.payment_schedule) if order.payment_schedule else []
+        if stored_schedule:
+            remaining_balance = float(sum(plan_engine.money(p['amount']) for p in stored_schedule[1:]))
+        else:
+            remaining_balance = order.total_payable - order.down_payment_amount
+
+        # MDR is charged on the product value P, not on delivery fee (§5.2: MS = P x (1 - MDR))
+        product_value = plan_engine.money(order.product_price) * (order.quantity or 1)
+        # The merchant's fee tier (§6.1), fixed on this contract now (§5.4)
+        from ..services import merchant_fees
+        fee_tier = merchant_fees.tier_of(order.merchant)
+        mdr = merchant_fees.rate_for(order.merchant)
+        commission_amount = (product_value * mdr).quantize(plan_engine.CENT, ROUND_HALF_UP)   # §5.5
+        fee_note = f"Merchant discount (MDR) {mdr * 100:.2f}% ({merchant_fees.TIERS[fee_tier][2]} tier)"
+        payout_amount = float(product_value - commission_amount)
         
-        # Calculate remaining balance
-        remaining_balance = order.total_payable - order.down_payment_amount
-        
-        # ============================================
-        # CALCULATE PAYOUT AMOUNT (10% commission deducted)
-        # ============================================
-        commission_rate = 10  # 10% commission
-        payout_amount = float(order.total_payable) * (1 - (commission_rate / 100))
-        commission_amount = float(order.total_payable) * (commission_rate / 100)
-        
-        print(f"Order Total: GHS {order.total_payable}")
-        print(f"Commission ({commission_rate}%): GHS {commission_amount}")
-        print(f"Merchant Payout: GHS {payout_amount}")
-        
-        print(f"Creating instalment plan for customer {order.customer_id}, product {order.product_name}")
-        print(f"Total: {order.total_payable}, Down: {order.down_payment_amount}, Remaining: {remaining_balance}")
-        print(f"Installments: {order.number_of_installments}, Amount per installment: {order.installment_amount}")
-        
-        # Generate plan ID
-        plan_id = None
-        try:
-            plan_id = InstalmentPlan.generate_plan_id(InstalmentPlan)
-            print(f"Generated plan_id: {plan_id}")
-        except Exception as e:
-            print(f"Error generating plan_id: {e}")
-            # Fallback: create a simple plan_id
-            from sqlalchemy import func
-            result = db.session.query(func.max(InstalmentPlan.id)).scalar()
-            plan_id = f"IP{(result + 1) if result else 1:04d}"
-            print(f"Fallback plan_id: {plan_id}")
-        
-        # Create instalment plan
+        # Payment 1 (down payment + delivery fee): normally already collected at checkout
+        # through Paystack. In the manual fallback (no Paystack), it's only marked paid when
+        # the admin records the reference for money received; otherwise it waits for verification.
+        if order.down_payment_status == 'paid':
+            down_payment_reference = order.down_payment_reference
+            down_payment_method = order.down_payment_method or 'paystack'
+        else:
+            down_payment_reference = (data.get('down_payment_reference') or '').strip()
+            down_payment_method = (data.get('down_payment_method') or 'mobile_money').strip()
+        down_payment_received = bool(down_payment_reference)
+
+        # Orders placed before server-side pricing carry a browser-built schedule
+        # (no 'type' field). Those amounts can't be trusted, so they must be re-placed.
+        if not stored_schedule or any('type' not in item for item in stored_schedule):
+            db.session.rollback()
+            return {"error": "This order was priced by the old checkout. Reject it and ask the customer to place it again."}, 409
         try:
             instalment_plan = InstalmentPlan(
-                plan_id=plan_id,
+                plan_id=InstalmentPlan.generate_plan_id(InstalmentPlan),
                 merchant_id=order.merchant_id,
                 customer_id=order.customer_id,
                 transaction_id=None,
@@ -613,125 +693,56 @@ class AdminApproveOrderResource(Resource):
                 start_date=start_date,
                 end_date=end_date,
                 status='active',
-                payment_status='partial',
-                paid_installments=1,
+                payment_status='partial' if down_payment_received else 'pending',
+                paid_installments=1 if down_payment_received else 0,
                 customer_name=order.customer.full_name or order.customer.business_name or "Customer",
                 customer_phone=order.customer.phone or "",
-                customer_email=order.customer.email or ""
-                # Store payout information
-               
-                # payout_amount=payout_amount
+                customer_email=order.customer.business_email or order.customer.email or ""
             )
             db.session.add(instalment_plan)
             db.session.flush()
-            print(f"Instalment plan created with ID: {instalment_plan.id}, Plan ID: {instalment_plan.plan_id}")
-        except Exception as e:
-            print(f"Error creating instalment plan: {e}")
-            db.session.rollback()
-            return {"error": f"Failed to create instalment plan: {str(e)}"}, 500
-        
-        # Parse payment schedule from order
-        payment_schedule = []
-        if order.payment_schedule:
-            try:
-                if isinstance(order.payment_schedule, str):
-                    payment_schedule = json.loads(order.payment_schedule)
+
+
+            from ..services import ledger
+            down_payment_row = None
+
+            for item in stored_schedule:
+                number = int(item['installment_number'])
+                amount = float(plan_engine.money(item['amount']))
+                due_date = datetime.strptime(item['due_date'][:10], '%Y-%m-%d')
+                is_down_payment = number == 1
+
+                if is_down_payment and down_payment_received:
+                    status, paid_date, paid_amount = 'paid', start_date, amount
+                elif is_down_payment:
+                    status, paid_date, paid_amount = 'pending_verification', None, 0
                 else:
-                    payment_schedule = order.payment_schedule
-                print(f"Payment schedule loaded: {len(payment_schedule)} payments")
-            except Exception as e:
-                print(f"Error parsing payment schedule: {e}")
-                payment_schedule = []
-        
-        if not payment_schedule:
-            # Create default payment schedule
-            print("Creating default payment schedule")
-            payment_schedule = []
-            # Down payment
-            payment_schedule.append({
-                "installment_number": 1,
-                "amount": order.down_payment_amount,
-                "due_date": start_date.strftime('%Y-%m-%d'),
-                "status": "due_now",
-                "description": "Down Payment (40% upfront)"
-            })
-            # Remaining installments
-            for i in range(2, order.number_of_installments + 1):
-                due_date = start_date + timedelta(days=30 * (i - 1))
-                payment_schedule.append({
-                    "installment_number": i,
-                    "amount": order.installment_amount,
-                    "due_date": due_date.strftime('%Y-%m-%d'),
-                    "status": "pending",
-                    "description": f"Installment {i} of {order.number_of_installments}"
-                })
-        
-        # Create payment schedule entries
-        payments_created = 0
-        for i, payment in enumerate(payment_schedule):
-            try:
-                installment_number = payment.get('installment_number', i + 1)
-                amount = payment.get('amount', 0)
-                due_date_str = payment.get('due_date')
-                
-                # Parse due date
-                if due_date_str and due_date_str != 'Now':
-                    try:
-                        due_date = datetime.strptime(due_date_str, '%Y-%m-%d')
-                    except:
-                        due_date = start_date + timedelta(days=30 * (installment_number - 1))
-                else:
-                    due_date = start_date if installment_number == 1 else start_date + timedelta(days=30 * (installment_number - 1))
-                
-                # First installment (down payment) is paid, others are pending
-                status = 'paid' if installment_number == 1 else 'pending'
-                paid_date = start_date if installment_number == 1 else None
-                
-                # Generate payment ID
-                payment_id = None
-                try:
-                    payment_id = InstalmentPayment.generate_payment_id(InstalmentPayment)
-                except:
-                    from sqlalchemy import func
-                    result = db.session.query(func.max(InstalmentPayment.id)).scalar()
-                    payment_id = f"PAY{(result + 1) if result else 1:04d}"
-                
-                instalment_payment = InstalmentPayment(
-                    payment_id=payment_id,
+                    status, paid_date, paid_amount = 'pending', None, 0
+
+                row = InstalmentPayment(
+                    payment_id=InstalmentPayment.generate_payment_id(InstalmentPayment),
                     plan_id=instalment_plan.id,
-                    installment_number=int(installment_number),
+                    installment_number=number,
                     due_date=due_date,
                     paid_date=paid_date,
-                    amount=float(amount),
-                    paid_amount=float(amount) if status == 'paid' else 0,
+                    amount=amount,
+                    paid_amount=paid_amount,
                     status=status,
+                    payment_method=down_payment_method if is_down_payment and down_payment_received else None,
+                    payment_reference=down_payment_reference if is_down_payment and down_payment_received else None,
                     late_fee=0,
                     late_fee_paid=False
                 )
-                db.session.add(instalment_payment)
-                payments_created += 1
-                print(f"Created payment {installment_number}: amount {amount}, status {status}")
-            except Exception as e:
-                print(f"Error creating payment {i}: {e}")
-        
-        print(f"Created {payments_created} payment schedule entries")
-        
-        # Create transaction record
-        try:
-            # Generate transaction ID
-            transaction_id = None
-            try:
-                transaction_id = Transaction.generate_transaction_id(Transaction)
-            except:
-                from sqlalchemy import func
-                result = db.session.query(func.max(Transaction.id)).scalar()
-                transaction_id = f"TRX{(result + 1) if result else 1:04d}"
-            
+                db.session.add(row)
+                db.session.flush()
+                if is_down_payment:
+                    down_payment_row = row
+
             transaction = Transaction(
-                transaction_id=transaction_id,
+                transaction_id=Transaction.generate_transaction_id(Transaction),
                 customer_id=order.customer_id,
                 merchant_id=order.merchant_id,
-                amount=float(order.total_payable),
+                amount=float(product_value),
                 product_name=order.product_name,
                 product_description=order.product_description or "",
                 quantity=order.quantity or 1,
@@ -740,32 +751,37 @@ class AdminApproveOrderResource(Resource):
                 payment_status='processing',
                 delivery_address=order.delivery_address or "",
                 transaction_date=datetime.now(),
-              
                 payout_amount=payout_amount
             )
             db.session.add(transaction)
-            print(f"Transaction created with ID: {transaction.transaction_id}")
-            print(f"  - Total: GHS {order.total_payable}")
-            print(f"  - Commission ({commission_rate}%): GHS {commission_amount}")
-            print(f"  - Merchant Payout: GHS {payout_amount}")
-        except Exception as e:
-            print(f"Error creating transaction: {e}")
-        
-        # Commit all changes
-        try:
+            db.session.flush()
+            instalment_plan.transaction_id = transaction.id
+            order.transaction_id = transaction.id
+
+            # Ledger: the contract, the merchant side, and the down payment if already received
+            ledger.open_plan(instalment_plan, order.total_payable, commission_amount,
+                             payout_amount, user=current_admin, fee_note=fee_note)
+            if down_payment_received and down_payment_row is not None:
+                ledger.payment_received(instalment_plan, down_payment_row, down_payment_row.amount,
+                                        down_payment_reference, user=current_admin)
+
             db.session.commit()
-            print("All changes committed successfully")
         except Exception as e:
-            print(f"Error committing changes: {e}")
-            db.session.rollback()
-            return {"error": f"Failed to commit: {str(e)}"}, 500
-        
+            return self._fail(f"Failed to approve order: {e}")
+
         return {
             "message": "Order approved and instalment plan created",
             "transaction_id": transaction.transaction_id,
             "plan_id": instalment_plan.plan_id,
-            "payments_created": payments_created,
+            "payments_created": len(stored_schedule),
+            "down_payment_status": "paid" if down_payment_received else "pending_verification",
             "order_total": float(order.total_payable),
+            "merchant_fee": float(commission_amount),
             "payout_amount": payout_amount,
             "currency": "GHS"
         }, 200
+
+    @staticmethod
+    def _fail(message):
+        db.session.rollback()
+        return {"error": message}, 500

@@ -1,4 +1,5 @@
 from flask_restful import Resource, request
+from ..services import merchant_fees
 from flask_praetorian import auth_required, current_user
 from ..models.user import User
 from ..models.transaction import Transaction
@@ -90,9 +91,7 @@ class GetTransactionsResource(Resource):
                 "notes": safe_str(t.notes),
                 "created_at": t.created_at.isoformat() if t.created_at else "",
                 # Payout information
-                "commission_rate": safe_float(getattr(t, 'commission_rate', 10)),
-                "commission_amount": safe_float(getattr(t, 'commission_amount', 0)),
-                "payout_amount": safe_float(getattr(t, 'payout_amount', 0)),
+                **merchant_fees.transaction_fields(t),   # fee from the stored payout (tier, §6.1)
                 "is_instalment": getattr(t, 'payment_plan', None) is not None
             } for t in transactions
         ]
@@ -101,64 +100,13 @@ class GetTransactionsResource(Resource):
 class CreateTransactionResource(Resource):
     @auth_required
     def post(self):
-        """Create a new transaction"""
-        current_user_obj = current_user()
-        
-        if current_user_obj.role != "customer":
-            return {"error": "Only customers can create transactions"}, 403
-        
-        data = request.get_json()
-        
-        # Validate required fields
-        required_fields = ['merchant_id', 'amount', 'product_name']
-        for field in required_fields:
-            if field not in data:
-                return {"error": f"{field} is required"}, 400
-        
-        # Check if merchant exists
-        merchant = User.query.get(data['merchant_id'])
-        if not merchant or merchant.role != 'merchant':
-            return {"error": "Merchant not found"}, 404
-        
-        # Calculate payout amounts (10% commission)
-        commission_rate = 10
-        commission_amount = data['amount'] * (commission_rate / 100)
-        payout_amount = data['amount'] - commission_amount
-        
-        # Create transaction
-        transaction = Transaction(
-            customer_id=current_user_obj.id,
-            merchant_id=data['merchant_id'],
-            amount=data['amount'],
-            product_name=data['product_name'],
-            product_description=data.get('product_description', ''),
-            quantity=data.get('quantity', 1),
-            payment_method=data.get('payment_method', ''),
-            payment_reference=data.get('payment_reference', ''),
-            delivery_address=data.get('delivery_address', ''),
-            notes=data.get('notes', ''),
-            status='pending',
-            payment_status='pending',
-            delivery_status='pending',
-            commission_rate=commission_rate,
-            commission_amount=commission_amount,
-            payout_amount=payout_amount
-        )
-        
-        transaction.transaction_id = transaction.generate_transaction_id()
-        
-        db.session.add(transaction)
-        db.session.commit()
-        
-        return {
-            "message": "Transaction created successfully",
-            "transaction_id": transaction.transaction_id,
-            "id": transaction.id,
-            "amount": transaction.amount,
-            "commission_rate": commission_rate,
-            "commission_amount": commission_amount,
-            "payout_amount": payout_amount
-        }, 201
+        """Disabled: transactions are only created when an admin approves a purchase order.
+
+        This endpoint let a customer create a transaction for any merchant and amount,
+        and it crashed on unknown columns anyway. Purchases go through /customer/purchase.
+        """
+        return {"error": "Transactions are created from approved purchase orders. Use /customer/purchase."}, 410
+
 
 
 class UpdateTransactionStatusResource(Resource):
@@ -171,35 +119,33 @@ class UpdateTransactionStatusResource(Resource):
         if not transaction:
             return {"error": "Transaction not found"}, 404
         
-        # Check permissions
-        if current_user_obj.role == 'admin':
-            pass
-        elif current_user_obj.role == 'merchant' and transaction.merchant_id != current_user_obj.id:
+        # Only fulfilment details can be edited here. Money states (status, payment_status,
+        # payment_reference) follow the payments and the ledger; delivery is confirmed by the merchant
+        # through /merchant/orders/<id>/delivery, which makes the sale payable (settlements).
+        if current_user_obj.role == 'admin' or (current_user_obj.role == 'merchant'
+                                                and transaction.merchant_id == current_user_obj.id):
+            allowed_fields = ['tracking_number', 'notes']
+        else:
             return {"error": "Unauthorized"}, 403
-        elif current_user_obj.role == 'customer' and transaction.customer_id != current_user_obj.id:
-            return {"error": "Unauthorized"}, 403
-        
-        data = request.get_json()
-        
-        # Allowed fields to update
-        allowed_fields = ['status', 'payment_status', 'delivery_status', 'tracking_number', 'payment_reference', 'notes']
-        
+
+        data = request.get_json() or {}
+        refused = [f for f in ('status', 'payment_status', 'payment_reference', 'delivery_status') if f in data]
+        if refused:
+            return {"error": "Only the tracking number and notes can be changed here. Delivery is confirmed on "
+                             "the merchant's Orders screen; payment states follow the payments."}, 400
+
         for field in allowed_fields:
             if field in data:
                 setattr(transaction, field, data[field])
-        
-        if data.get('status') == 'completed' and not transaction.completion_date:
-            transaction.completion_date = datetime.utcnow()
-        
         db.session.commit()
-        
+
+        fee, payout = merchant_fees.transaction_split(transaction)
         return {
             "message": "Transaction updated successfully",
             "transaction_id": transaction.transaction_id,
             "amount": transaction.amount,
-            "commission_rate": getattr(transaction, 'commission_rate', 10),
-            "commission_amount": getattr(transaction, 'commission_amount', 0),
-            "payout_amount": getattr(transaction, 'payout_amount', 0)
+            "commission_amount": fee,
+            "payout_amount": payout
         }, 200
 
 
@@ -259,22 +205,13 @@ class GetTransactionStatsResource(Resource):
 
 
 class DeleteTransactionResource(Resource):
+    """Turned off (go-live review): Transactions are financial records and can't be deleted."""
+
     @auth_required
-    def delete(self, transaction_id):
-        """Delete a transaction (admin only)"""
-        current_user_obj = current_user()
-        
-        if current_user_obj.role != 'admin':
+    def delete(self, *args, **kwargs):
+        if current_user().role not in ('admin', 'merchant', 'customer'):
             return {"error": "Unauthorized"}, 403
-        
-        transaction = Transaction.query.get(transaction_id)
-        if not transaction:
-            return {"error": "Transaction not found"}, 404
-        
-        db.session.delete(transaction)
-        db.session.commit()
-        
-        return {"message": "Transaction deleted successfully"}, 200
+        return {"error": "Transactions are financial records and can't be deleted."}, 410
 
 
 class MerchantGetTransactionsResource(Resource):
@@ -332,8 +269,9 @@ class MerchantGetTransactionsResource(Resource):
         transactions = query.order_by(Transaction.created_at.desc()).offset((page - 1) * limit).limit(limit).all()
         
         # Calculate total payout for filtered transactions
-        total_payout = sum(getattr(t, 'payout_amount', 0) or 0 for t in transactions)
-        total_commission = sum(getattr(t, 'commission_amount', 0) or 0 for t in transactions)
+        splits = [merchant_fees.transaction_split(t) for t in transactions]
+        total_payout = sum(p for _f, p in splits)
+        total_commission = sum(f for f, _p in splits)
         
         return {
             "transactions": [{
@@ -357,9 +295,7 @@ class MerchantGetTransactionsResource(Resource):
                 "created_at": t.created_at.isoformat() if t.created_at else "",
                 "is_instalment": t.payment_plan is not None and t.payment_plan != '',
                 # Payout information for merchants
-                "commission_rate": safe_float(getattr(t, 'commission_rate', 10)),
-                "commission_amount": safe_float(getattr(t, 'commission_amount', 0)),
-                "payout_amount": safe_float(getattr(t, 'payout_amount', 0))
+                **merchant_fees.transaction_fields(t)   # fee from the stored payout (tier, §6.1)
             } for t in transactions],
             "total": total,
             "page": page,
@@ -389,26 +325,27 @@ class MerchantGetTransactionStatsResource(Resource):
         ).all()
         
         # Calculate total payout (all time)
-        total_payout = sum(getattr(t, 'payout_amount', t.amount * 0.9) for t in all_completed_transactions)
-        total_commission = sum(getattr(t, 'commission_amount', t.amount * 0.1) for t in all_completed_transactions)
+        splits = [merchant_fees.transaction_split(t, current_merchant) for t in all_completed_transactions]
+        total_payout = sum(p for _f, p in splits)
+        total_commission = sum(f for f, _p in splits)
         
         # Calculate pending payout (completed but not paid)
         pending_transactions = [t for t in all_completed_transactions if getattr(t, 'payment_status', 'pending') == 'pending']
-        pending_payout = sum(getattr(t, 'payout_amount', t.amount * 0.9) for t in pending_transactions)
+        pending_payout = sum(merchant_fees.transaction_split(t)[1] for t in pending_transactions)
         
         # Calculate paid payout
         paid_transactions = [t for t in all_completed_transactions if getattr(t, 'payment_status', '') == 'paid']
-        paid_payout = sum(getattr(t, 'payout_amount', t.amount * 0.9) for t in paid_transactions)
+        paid_payout = sum(merchant_fees.transaction_split(t)[1] for t in paid_transactions)
         
         # This month's payout
         this_month_transactions = [t for t in all_completed_transactions if t.completion_date and t.completion_date >= month_ago]
-        this_month_payout = sum(getattr(t, 'payout_amount', t.amount * 0.9) for t in this_month_transactions)
+        this_month_payout = sum(merchant_fees.transaction_split(t)[1] for t in this_month_transactions)
         
         # Last month's payout (for growth calculation)
         last_month_start = (month_ago - timedelta(days=30)).replace(day=1)
         last_month_end = month_ago - timedelta(days=1)
         last_month_transactions = [t for t in all_completed_transactions if t.completion_date and last_month_start <= t.completion_date <= last_month_end]
-        last_month_payout = sum(getattr(t, 'payout_amount', t.amount * 0.9) for t in last_month_transactions)
+        last_month_payout = sum(merchant_fees.transaction_split(t)[1] for t in last_month_transactions)
         
         # Calculate payout growth
         if last_month_payout > 0:
@@ -441,26 +378,28 @@ class MerchantUpdateTransactionStatusResource(Resource):
         if not transaction or transaction.merchant_id != current_merchant.id:
             return {"error": "Transaction not found"}, 404
         
-        data = request.get_json()
-        
-        allowed_fields = ['status', 'payment_status', 'delivery_status', 'tracking_number', 'notes']
-        
+        data = request.get_json() or {}
+
+        # Merchants can't set status/payment_status: those drive settlements. Delivery is
+        # confirmed through /merchant/orders/<id>/delivery, which creates the settlement line.
+        if any(f in data for f in ('status', 'payment_status', 'payment_reference', 'delivery_status')):
+            return {"error": "Confirm delivery on your Orders screen. Only the tracking number and notes "
+                             "can be changed here."}, 400
+        allowed_fields = ['tracking_number', 'notes']
+
         for field in allowed_fields:
             if field in data:
                 setattr(transaction, field, data[field])
-        
-        if data.get('status') == 'completed' and not transaction.completion_date:
-            transaction.completion_date = datetime.utcnow()
-        
+
         db.session.commit()
-        
+
+        fee, payout = merchant_fees.transaction_split(transaction, current_merchant)
         return {
             "message": "Transaction updated successfully",
             "transaction_id": transaction.transaction_id,
             "amount": transaction.amount,
-            "commission_rate": getattr(transaction, 'commission_rate', 10),
-            "commission_amount": getattr(transaction, 'commission_amount', 0),
-            "payout_amount": getattr(transaction, 'payout_amount', 0)
+            "commission_amount": fee,
+            "payout_amount": payout
         }, 200
 
 
@@ -478,59 +417,34 @@ class MerchantUpdateTransactionResource(Resource):
         if not transaction or transaction.merchant_id != current_merchant.id:
             return {"error": "Transaction not found"}, 404
         
-        data = request.get_json()
-        
-        allowed_fields = ['delivery_address', 'tracking_number', 'notes', 'payment_reference']
-        
+        data = request.get_json() or {}
+
+        # Fulfilment details only; the payment reference belongs to the payment records
+        if any(f in data for f in ('status', 'payment_status', 'payment_reference', 'delivery_status')):
+            return {"error": "Only the delivery address, tracking number and notes can be changed here."}, 400
+        allowed_fields = ['delivery_address', 'tracking_number', 'notes']
+
         for field in allowed_fields:
             if field in data:
                 setattr(transaction, field, data[field])
-        
+
         db.session.commit()
-        
+
         return {
             "message": "Transaction updated successfully",
             "transaction_id": transaction.transaction_id,
-            "payout_amount": getattr(transaction, 'payout_amount', 0)
+            "payout_amount": merchant_fees.transaction_split(transaction, current_merchant)[1]
         }, 200
 
 
 class MerchantRefundTransactionResource(Resource):
+    """Turned off (go-live review): Refunds go through a dispute (the customer opens it and Tabital resolves it) or an order rejection; marking a sale refunded here didn't move any money or stop the customer's plan."""
+
     @auth_required
-    def post(self, transaction_id):
-        """Process a refund for a transaction"""
-        current_merchant = current_user()
-        
-        if current_merchant.role != "merchant":
+    def post(self, *args, **kwargs):
+        if current_user().role != 'merchant':
             return {"error": "Unauthorized"}, 403
-        
-        transaction = Transaction.query.get(transaction_id)
-        
-        if not transaction or transaction.merchant_id != current_merchant.id:
-            return {"error": "Transaction not found"}, 404
-        
-        if transaction.status != 'completed':
-            return {"error": "Only completed transactions can be refunded"}, 400
-        
-        data = request.get_json()
-        refund_amount = data.get('refund_amount', transaction.amount)
-        reason = data.get('reason', '')
-        
-        # Calculate refund impact on payout
-        refund_payout_impact = refund_amount * (1 - (getattr(transaction, 'commission_rate', 10) / 100))
-        
-        transaction.status = 'refunded'
-        transaction.payment_status = 'refunded'
-        transaction.notes = f"Refunded: {reason}" if reason else transaction.notes
-        
-        db.session.commit()
-        
-        return {
-            "message": f"Refund of {refund_amount} processed successfully",
-            "refund_amount": refund_amount,
-            "refund_payout_impact": refund_payout_impact,
-            "transaction_id": transaction.transaction_id
-        }, 200
+        return {"error": "Refunds go through a dispute (the customer opens it and Tabital resolves it) or an order rejection; marking a sale refunded here didn't move any money or stop the customer's plan."}, 410
 
 
 class MerchantExportTransactionsResource(Resource):
@@ -579,9 +493,9 @@ class MerchantExportTransactionsResource(Resource):
                 t.product_name,
                 t.quantity,
                 t.amount,
-                getattr(t, 'commission_rate', 10),
-                getattr(t, 'commission_amount', 0),
-                getattr(t, 'payout_amount', 0),
+                merchant_fees.transaction_fields(t)['commission_rate'],
+                merchant_fees.transaction_fields(t)['commission_amount'],
+                merchant_fees.transaction_fields(t)['payout_amount'],
                 t.status,
                 t.payment_status,
                 t.payment_method,
@@ -689,8 +603,8 @@ class MerchantRecentPayoutsResource(Resource):
                 "id": t.id,
                 "payout_id": t.transaction_id,
                 "amount": float(t.amount),
-                "payout_amount": float(getattr(t, 'payout_amount', t.amount * 0.9)),
-                "commission_amount": float(getattr(t, 'commission_amount', t.amount * 0.1)),
+                "payout_amount": merchant_fees.transaction_split(t)[1],
+                "commission_amount": merchant_fees.transaction_split(t)[0],
                 "status": t.payment_status or 'pending',
                 "date": t.completion_date.isoformat() if t.completion_date else t.created_at.isoformat(),
                 "product_name": t.product_name

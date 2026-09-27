@@ -31,7 +31,7 @@ class User(db.Model):
     payment_plan = db.Column(db.String(50))
     payment_frequency = db.Column(db.String(50))
     ref_name = db.Column(db.String(100))
-    ref_phone = db.Column(db.String(100),unique=True)
+    ref_phone = db.Column(db.String(100))  # not unique: two customers may share a referee
     ref_relationship = db.Column(db.String(100))
     shop_url = db.Column(db.String(200))
     
@@ -64,9 +64,39 @@ class User(db.Model):
     branch_name = db.Column(db.String(100))
     account_number = db.Column(db.String(100),unique=True)
     
+    # Underwriting (Phase 3). national_id holds the Ghana Card number.
+    monthly_salary = db.Column(db.Numeric(12, 2))
+    employment_start_date = db.Column(db.Date)
+    salary_paid_to_bank = db.Column(db.Boolean, default=False)
+    salary_verified = db.Column(db.Boolean, default=False)      # set by admin against the salary certificate
+    risk_tier = db.Column(db.String(10))                         # latest decision: low / medium / high
+    credit_limit = db.Column(db.Numeric(12, 2))                  # latest decision
+    credit_limit_override = db.Column(db.Numeric(12, 2))         # admin override, with a reason on the assessment
+    limit_updated_at = db.Column(db.DateTime)
+
+    # Merchant settlement and payouts (Phase 5)
+    settlement_period_days = db.Column(db.Integer, default=7)     # 3, 7 or 30 (§13.1 D4)
+    payout_method = db.Column(db.String(20))                      # mobile_money or bank
+    payout_bank_code = db.Column(db.String(20))                   # Paystack bank / MoMo provider code
+    paystack_recipient_code = db.Column(db.String(64))            # created from the current payout details
+    payout_details_updated_at = db.Column(db.DateTime)
+    payout_hold_until = db.Column(db.DateTime)                    # payouts paused after a details change
+
+    # Employment verification (Phase 6, §9B): needed for a first purchase and high-ticket orders
+    employment_verified_at = db.Column(db.DateTime)
+    employment_verified_by = db.Column(db.Integer)                # admin user id
+    employment_verification_method = db.Column(db.String(30))     # employer_call / employer_letter / payslip / ssnit
+    employment_verification_note = db.Column(db.String(500))
+
     # KYC Fields
     kyc_status = db.Column(db.String(50), default='pending')
     verification_level = db.Column(db.String(50), default='standard')
+    # Admins only: 'management' (approvals, rates, settings, reveals, exports) or 'operations'
+    # (read-only apart from reminders and notes). See services/access.py
+    admin_level = db.Column(db.String(20))
+    # Merchants only: premium | standard | high_risk, set by management (services/merchant_fees.py).
+    # Empty means standard.
+    merchant_fee_tier = db.Column(db.String(20))
     aml_screening = db.Column(db.String(50), default='pending')
     kyc_completed_on = db.Column(db.DateTime)
     
@@ -79,6 +109,7 @@ class User(db.Model):
     updated_at = db.Column(db.DateTime, onupdate=db.func.now())
     reset_otp = db.Column(db.String(10))
     reset_otp_expiry = db.Column(db.DateTime)
+    reset_otp_attempts = db.Column(db.Integer, default=0)
     reset_token = db.Column(db.String(100))
     reset_token_expiry = db.Column(db.DateTime)
 
@@ -100,7 +131,10 @@ class User(db.Model):
         return cls.query.get(id)
     
     def is_valid(self):
-        return self.status == 'approved'
+        """Checked by flask_praetorian when a token is issued or refreshed (not on every request, so a
+        suspended user keeps access until their token expires, JWT_ACCESS_MINUTES). 'active' is the status admins set
+        to reinstate an account; 'restricted' can still sign in to pay (not buy: customer_purchase.py)."""
+        return self.status in ('approved', 'active', 'restricted')
     
     @staticmethod
     def get_next_customer_id():

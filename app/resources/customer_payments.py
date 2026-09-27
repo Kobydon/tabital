@@ -20,9 +20,8 @@ class CustomerGetPaymentsResource(Resource):
         if current_customer.role != "customer":
             return {"error": "Unauthorized"}, 403
         
-        # Apply late fees to all overdue payments before displaying
-        InstalmentPayment.apply_late_fees_for_all_overdue_payments()
-        
+        # Late fees are applied by the daily servicing job (flask run-daily), not on page views
+
         # Get query parameters
         page = request.args.get('page', 1, type=int)
         limit = request.args.get('limit', 20, type=int)
@@ -113,9 +112,6 @@ class CustomerGetPaymentStatsResource(Resource):
         if current_customer.role != "customer":
             return {"error": "Unauthorized"}, 403
         
-        # Apply late fees before calculating stats
-        InstalmentPayment.apply_late_fees_for_all_overdue_payments()
-        
         # Get all instalment payments for customer
         payments = InstalmentPayment.query.join(
             InstalmentPlan
@@ -123,7 +119,8 @@ class CustomerGetPaymentStatsResource(Resource):
             InstalmentPlan.customer_id == current_customer.id
         ).all()
         
-        total_paid = sum(p.amount for p in payments if p.status == 'paid')
+        total_paid = sum(float(p.paid_amount or p.amount) for p in payments if p.status == 'paid') + \
+            sum(float(p.part_paid()) for p in payments if p.status != 'paid')      # part payments count
         total_late_fees_paid = sum(p.late_fee for p in payments if p.late_fee_paid)
         total_late_fees_unpaid = sum(p.late_fee for p in payments if not p.late_fee_paid and p.late_fee > 0)
         
@@ -192,7 +189,7 @@ class CustomerDownloadReceiptResource(Resource):
         y -= 15
         c.drawString(50, y, f"Payment Date: {payment.paid_date.strftime('%Y-%m-%d') if payment.paid_date else 'N/A'}")
         y -= 15
-        c.drawString(50, y, f"Amount Paid: GHS {payment.amount:.2f}")
+        c.drawString(50, y, f"Amount Paid: GHS {float(payment.paid_amount or payment.amount):.2f}")
         y -= 15
         c.drawString(50, y, f"Payment Method: {payment.payment_method or 'N/A'}")
         y -= 15
@@ -263,86 +260,60 @@ class CustomerPaymentReminderResource(Resource):
 class CustomerMakePaymentResource(Resource):
     @auth_required
     def post(self):
-        """Make a payment for an installment with late fee handling"""
+        """Customer submits a payment for the next instalment.
+
+        Until Paystack is integrated (Phase 2), a customer submission never marks an
+        instalment paid. It records the method and reference and sets the instalment to
+        'pending_verification'. An admin confirms it with
+        /admin/instalments/payments/<id>/mark-paid after checking the money arrived.
+        """
         current_customer = current_user()
-        
+
         if current_customer.role != "customer":
             return {"error": "Unauthorized"}, 403
-        
-        data = request.get_json()
+
+        data = request.get_json() or {}
         plan_id = data.get('plan_id')
-        amount = data.get('amount')
-        payment_method = data.get('payment_method')
-        payment_reference = data.get('payment_reference', '')
-        notes = data.get('notes', '')
-        
-        if not plan_id or not amount:
-            return {"error": "Plan ID and amount are required"}, 400
-        
-        # Get the instalment plan
+        payment_method = (data.get('payment_method') or '').strip()
+        payment_reference = (data.get('payment_reference') or '').strip()
+
+        if not plan_id:
+            return {"error": "Plan ID is required"}, 400
+        if payment_method not in ('mobile_money', 'bank_transfer', 'card'):
+            return {"error": "Choose Mobile Money, bank transfer or card"}, 400
+        if not payment_reference:
+            return {"error": "Enter the transaction reference from your MoMo or bank receipt"}, 400
+
         plan = InstalmentPlan.query.filter_by(id=plan_id, customer_id=current_customer.id).first()
         if not plan:
             return {"error": "Instalment plan not found"}, 404
-        
-        # Find the next pending payment
-        next_payment = InstalmentPayment.query.filter_by(
-            plan_id=plan.id,
-            status='pending'
+
+        next_payment = InstalmentPayment.query.filter(
+            InstalmentPayment.plan_id == plan.id,
+            InstalmentPayment.status.in_(['pending', 'overdue'])
         ).order_by(InstalmentPayment.installment_number).first()
-        
+
         if not next_payment:
-            # Also check for overdue payments
-            next_payment = InstalmentPayment.query.filter_by(
-                plan_id=plan.id,
-                status='overdue'
-            ).order_by(InstalmentPayment.installment_number).first()
-            
-            if not next_payment:
-                return {"error": "No pending payments found for this plan"}, 400
-        
-        # Apply late fee if payment is overdue
-        next_payment.apply_late_fee()
-        
-        # Calculate total due (amount + late fee)
-        total_due = next_payment.get_total_due()
-        
-        # Verify payment amount
-        if amount < total_due:
-            return {
-                "error": f"Insufficient payment amount. Total due is {total_due:.2f} (includes {next_payment.late_fee:.2f} late fee)"
-            }, 400
-        
-        # Process payment
-        next_payment.status = 'paid'
-        next_payment.paid_date = datetime.now()
-        next_payment.payment_method = payment_method
-        next_payment.payment_reference = payment_reference
-        next_payment.paid_amount = amount
-        
-        # If late fee was applied and paid
-        if next_payment.late_fee > 0 and not next_payment.late_fee_paid:
-            next_payment.late_fee_paid = True
-        
-        # Update plan
-        plan.paid_installments += 1
-        plan.remaining_amount -= next_payment.amount
-        
-        if plan.paid_installments == plan.number_of_installments:
-            plan.status = 'completed'
-            plan.payment_status = 'completed'
-            plan.completed_at = datetime.now()
-        
+            return {"error": "No payments due on this plan"}, 400
+
+        # Only a claim: the instalment itself doesn't change until Tabital confirms the money
+        # arrived (collections -> payment claims). Late fees and reminders carry on meanwhile.
+        from ..models.payment_claim import PaymentClaim
+        if PaymentClaim.query.filter_by(payment_id=next_payment.id, status=PaymentClaim.PENDING).first():
+            return {"error": "We're already checking a payment you told us about for this instalment."}, 409
+        claim = PaymentClaim(payment_id=next_payment.id, plan_id=plan.id, customer_id=current_customer.id,
+                             method=payment_method, reference=payment_reference[:100])
+        db.session.add(claim)
         db.session.commit()
-        
+
         return {
-            "message": "Payment successful",
-            "payment_reference": next_payment.payment_id,
-            "amount_paid": amount,
-            "late_fee_paid": next_payment.late_fee if next_payment.late_fee_paid else 0,
-            "remaining_balance": plan.remaining_amount,
-            "paid_installments": plan.paid_installments,
-            "total_installments": plan.number_of_installments
-        }, 200
+            "message": "Thanks. We'll check the payment and update your plan once the money is received. "
+                       "Until then the instalment still shows as due.",
+            "payment_id": next_payment.payment_id,
+            "claim_id": claim.id,
+            "status": next_payment.status,
+            "amount_due": next_payment.get_total_due()
+        }, 202
 
 # resources/customer_paid_payments.py
 from flask_restful import Resource, request
@@ -404,7 +375,7 @@ class CustomerPaidPaymentsResource(Resource):
                 "plan_name": plan.plan_name if plan else "",
                 "merchant_name": merchant.business_name or merchant.full_name if merchant else "",
                 "installment_number": payment.installment_number,
-                "amount": payment.amount,
+                "amount": payment.paid_amount or payment.amount,
                 "payment_method": payment.payment_method or "",
                 "payment_reference": payment.payment_reference or "",
                 "status": payment.status,

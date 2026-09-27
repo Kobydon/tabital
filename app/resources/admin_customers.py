@@ -62,12 +62,12 @@ class AdminCustomerStatsResource(Resource):
         repeat_purchase_rate_growth = 5.2  # Sample value
         
         # Total Outstanding
-        total_outstanding = db.session.query(func.sum(InstalmentPlan.remaining_amount))\
-            .filter(InstalmentPlan.status == 'active').scalar() or 0
+        from app.services import ledger
+        total_outstanding = ledger.portfolio_totals(InstalmentPlan.status == 'active')['outstanding']
         
         # Outstanding growth
-        total_outstanding_last_30 = db.session.query(func.sum(InstalmentPlan.remaining_amount))\
-            .filter(InstalmentPlan.status == 'active', InstalmentPlan.created_at >= last_30_days).scalar() or 0
+        total_outstanding_last_30 = ledger.portfolio_totals(
+            InstalmentPlan.status == 'active', InstalmentPlan.created_at >= last_30_days)['outstanding']
         total_outstanding_previous = total_outstanding - total_outstanding_last_30
         outstanding_growth = round(((total_outstanding_last_30 - total_outstanding_previous) / total_outstanding_previous * 100) if total_outstanding_previous > 0 else 0, 1)
         
@@ -99,6 +99,8 @@ class AdminGetCustomersResource(Resource):
         kyc_status = request.args.get('kyc_status', '', type=str)
         status = request.args.get('status', '', type=str)
         sort_by = request.args.get('sort_by', 'created_at', type=str)
+        if sort_by not in ('created_at', 'full_name', 'business_name', 'customer_id', 'merchant_id', 'status', 'kyc_status', 'city'):   # never sort by an arbitrary column
+            sort_by = 'created_at'
         sort_order = request.args.get('sort_order', 'desc', type=str)
         
         # Build query
@@ -138,35 +140,19 @@ class AdminGetCustomersResource(Resource):
             total_financed = db.session.query(func.sum(InstalmentPlan.total_amount))\
                 .filter(InstalmentPlan.customer_id == customer.id).scalar() or 0
             
-            total_paid = db.session.query(func.sum(InstalmentPlan.amount_paid))\
-                .filter(InstalmentPlan.customer_id == customer.id).scalar() or 0
-            
-            outstanding = db.session.query(func.sum(InstalmentPlan.remaining_amount))\
-                .filter(InstalmentPlan.customer_id == customer.id, InstalmentPlan.status == 'active').scalar() or 0
+            from app.services import ledger
+            total_paid = ledger.portfolio_totals(InstalmentPlan.customer_id == customer.id)['paid']
+            outstanding = ledger.portfolio_totals(
+                InstalmentPlan.customer_id == customer.id, InstalmentPlan.status == 'active')['outstanding']
             
             active_plans = InstalmentPlan.query.filter_by(
                 customer_id=customer.id,
                 status='active'
             ).count()
             
-            # Determine risk level based on customer data
-            risk_level = "Low"
-            if outstanding > 1000 or active_plans > 2:
-                risk_level = "Medium"
-            if outstanding > 2000 or customer.kyc_status == 'rejected':
-                risk_level = "High"
-            
-            # Determine credit limit based on income range
-            credit_limit = 500
-            if customer.income_range:
-                if "5,000+" in customer.income_range:
-                    credit_limit = 5000
-                elif "3,000" in customer.income_range:
-                    credit_limit = 3000
-                elif "1,000" in customer.income_range:
-                    credit_limit = 2000
-                else:
-                    credit_limit = 1000
+            # Tier and limit come from the latest stored underwriting decision (Phase 3)
+            risk_level = (customer.risk_tier or 'not assessed').title()
+            credit_limit = float(customer.credit_limit) if customer.credit_limit is not None else 0.0
             
             customers.append({
                 "id": customer.id,
@@ -178,7 +164,7 @@ class AdminGetCustomersResource(Resource):
                 "risk_level": risk_level,
                 "credit_limit": credit_limit,
                 "outstanding": float(outstanding),
-                "status": customer.status if customer.status in ['active', 'approved'] else 'pending',
+                "status": customer.status or 'pending',          # the real status (restricted, suspended...)
                 "total_financed": float(total_financed),
                 "total_paid": float(total_paid),
                 "active_plans": active_plans,
@@ -247,12 +233,12 @@ class AdminCustomerStatsResource(Resource):
         repeat_purchase_rate = (customers_with_multiple_plans / total_customers * 100) if total_customers > 0 else 0
         
         # Total Outstanding
-        total_outstanding = db.session.query(func.sum(InstalmentPlan.remaining_amount))\
-            .filter(InstalmentPlan.status == 'active').scalar() or 0
+        from app.services import ledger
+        total_outstanding = ledger.portfolio_totals(InstalmentPlan.status == 'active')['outstanding']
         
         # Calculate outstanding growth
-        total_outstanding_last_30 = db.session.query(func.sum(InstalmentPlan.remaining_amount))\
-            .filter(InstalmentPlan.status == 'active', InstalmentPlan.created_at >= last_30_days).scalar() or 0
+        total_outstanding_last_30 = ledger.portfolio_totals(
+            InstalmentPlan.status == 'active', InstalmentPlan.created_at >= last_30_days)['outstanding']
         total_outstanding_previous = total_outstanding - total_outstanding_last_30
         outstanding_growth = ((total_outstanding_last_30 - total_outstanding_previous) / total_outstanding_previous * 100) if total_outstanding_previous > 0 else 0
         
@@ -286,11 +272,10 @@ class AdminGetCustomerDetailResource(Resource):
         total_financed = db.session.query(func.sum(InstalmentPlan.total_amount))\
             .filter(InstalmentPlan.customer_id == customer.id).scalar() or 0
         
-        total_paid = db.session.query(func.sum(InstalmentPlan.total_amount - InstalmentPlan.remaining_amount))\
-            .filter(InstalmentPlan.customer_id == customer.id).scalar() or 0
-        
-        outstanding = db.session.query(func.sum(InstalmentPlan.remaining_amount))\
-            .filter(InstalmentPlan.customer_id == customer.id, InstalmentPlan.status == 'active').scalar() or 0
+        from app.services import ledger
+        total_paid = ledger.portfolio_totals(InstalmentPlan.customer_id == customer.id)['paid']
+        outstanding = ledger.portfolio_totals(
+            InstalmentPlan.customer_id == customer.id, InstalmentPlan.status == 'active')['outstanding']
         
         active_plans = InstalmentPlan.query.filter_by(
             customer_id=customer.id,
@@ -359,7 +344,9 @@ class AdminGetCustomerDetailResource(Resource):
                 "created_at": customer.created_at.isoformat() if customer.created_at else None
             },
             "financial": {
-                "credit_limit": 2000,  # Could be dynamic based on customer
+                "credit_limit": float(customer.credit_limit) if customer.credit_limit is not None else 0.0,
+                "risk_tier": customer.risk_tier,
+                "limit_updated_at": customer.limit_updated_at.isoformat() if customer.limit_updated_at else None,
                 "outstanding": float(outstanding),
                 "total_paid": float(total_paid),
                 "total_financed": float(total_financed),
@@ -369,7 +356,7 @@ class AdminGetCustomerDetailResource(Resource):
                     "id": plan.id,
                     "plan_id": plan.plan_id,
                     "total_amount": float(plan.total_amount),
-                    "remaining_amount": float(plan.remaining_amount),
+                    "remaining_amount": plan.outstanding_balance,
                     "number_of_installments": plan.number_of_installments,
                     "status": plan.status
                 } for plan in active_plans]
@@ -397,7 +384,13 @@ class AdminUpdateCustomerStatusResource(Resource):
         customer = User.query.filter_by(id=customer_id, role='customer').first()
         if not customer:
             return {"error": "Customer not found"}, 404
-        
+        from ..services import accounts
+        blocked = accounts.status_change_error(customer, new_status)
+        if blocked:
+            return {"error": blocked}, 409
+        if len((reason or '').strip()) < 5:
+            return {"error": "Give a reason (at least 5 characters). It's kept with the change."}, 400
+        _log_status_change(customer, new_status, reason, current_admin)      # before: it records the old status
         customer.status = new_status
         
         # Log the status change (you can create an ActivityLog model)
@@ -408,37 +401,6 @@ class AdminUpdateCustomerStatusResource(Resource):
             "message": f"Customer status updated to {new_status}",
             "customer_id": customer.id,
             "status": new_status
-        }, 200
-
-
-class AdminUpdateCustomerCreditLimitResource(Resource):
-    @auth_required
-    def put(self, customer_id):
-        """Update customer credit limit"""
-        current_admin = current_user()
-        
-        if current_admin.role != 'admin':
-            return {"error": "Unauthorized"}, 403
-        
-        data = request.get_json()
-        new_limit = data.get('credit_limit')
-        
-        if not new_limit or new_limit < 0:
-            return {"error": "Invalid credit limit"}, 400
-        
-        customer = User.query.filter_by(id=customer_id, role='customer').first()
-        if not customer:
-            return {"error": "Customer not found"}, 404
-        
-        # You can store credit_limit in User model or a separate table
-        # For now, we'll just return success
-        
-        db.session.commit()
-        
-        return {
-            "message": f"Credit limit updated to GHS {new_limit}",
-            "customer_id": customer.id,
-            "credit_limit": new_limit
         }, 200
 
 
@@ -469,3 +431,11 @@ class AdminAddCustomerNoteResource(Resource):
             "customer_id": customer.id,
             "note": note
         }, 201
+
+def _log_status_change(user, new_status, reason, admin):
+    """Who changed an account's status, from what, to what, and why (setting_changes)."""
+    import json
+    from ..models.system_settings import SettingChange
+    db.session.add(SettingChange(setting_key=f"account_status:{user.id}", old_value=json.dumps(user.status),
+                                 new_value=json.dumps(new_status), changed_by=admin.id,
+                                 reason=(reason or "").strip()[:500]))

@@ -33,6 +33,16 @@ class InstalmentPlan(db.Model):
     # Tracking
     paid_installments = db.Column(db.Integer, default=0)
     missed_payments = db.Column(db.Integer, default=0)
+
+    # Delinquency, updated by the daily servicing job (§8.4, §8.5)
+    days_past_due = db.Column(db.Integer, default=0)
+    dpd_bucket = db.Column(db.String(20), default='current')   # current, dpd_1_30, dpd_31_60, dpd_61_90, dpd_90_plus
+    collection_stage = db.Column(db.String(30))                 # reminders, call_centre, employer_contact, bureau_reporting, legal_recovery
+    charged_off_at = db.Column(db.DateTime)
+
+    # Buyer protection: while paused, no late fees, DPD, reminders or autopay (Phase 4)
+    paused_at = db.Column(db.DateTime)
+    paused_reason = db.Column(db.String(255))
     
     # Customer Info (denormalized for quick access)
     customer_name = db.Column(db.String(200))
@@ -50,6 +60,18 @@ class InstalmentPlan(db.Model):
     customer = db.relationship('User', foreign_keys=[customer_id], backref='customer_instalments')
     transaction = db.relationship('Transaction', foreign_keys=[transaction_id], backref='instalment_plan')
     
+    # Balances always come from the ledger (CLAUDE.md §5.4). remaining_amount is kept
+    # only as the pre-ledger fallback and for old rows.
+    @property
+    def outstanding_balance(self):
+        from ..services import ledger
+        return float(ledger.plan_balance(self)["outstanding"])
+
+    @property
+    def paid_to_date(self):
+        from ..services import ledger
+        return float(ledger.plan_balance(self)["paid"])
+
     def generate_plan_id(self):
         """Generate a plan ID in format IP001, IP002, etc."""
         from sqlalchemy import func

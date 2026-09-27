@@ -1,4 +1,5 @@
 from flask_restful import Resource, request
+from ..services import merchant_fees
 from flask_praetorian import auth_required, current_user
 from app.models.user import User
 from app.models.transaction import Transaction
@@ -141,7 +142,7 @@ class AdminGetTransactionsResource(Resource):
                 "merchant_name": merchant.business_name if merchant else "N/A",
                 "merchant_phone": merchant.phone if merchant else "N/A",
                 "amount": float(transaction.amount),
-                "payout_amount": float(transaction.payout_amount) if transaction.payout_amount else float(transaction.amount * 0.9),
+                "payout_amount": merchant_fees.transaction_split(transaction)[1],
                 "product_name": transaction.product_name,
                 "product_description": transaction.product_description,
                 "quantity": transaction.quantity,
@@ -203,7 +204,7 @@ class AdminGetTransactionDetailResource(Resource):
                 "id": transaction.id,
                 "transaction_id": transaction.transaction_id,
                 "amount": float(transaction.amount),
-                "payout_amount": float(transaction.payout_amount) if transaction.payout_amount else float(transaction.amount * 0.9),
+                "payout_amount": merchant_fees.transaction_split(transaction)[1],
                 "product_name": transaction.product_name,
                 "product_description": transaction.product_description,
                 "quantity": transaction.quantity,
@@ -234,7 +235,7 @@ class AdminGetTransactionDetailResource(Resource):
             "instalment_plan": {
                 "plan_id": instalment_plan.plan_id if instalment_plan else None,
                 "total_amount": float(instalment_plan.total_amount) if instalment_plan else 0,
-                "remaining_amount": float(instalment_plan.remaining_amount) if instalment_plan else 0,
+                "remaining_amount": instalment_plan.outstanding_balance if instalment_plan else 0,
                 "number_of_installments": instalment_plan.number_of_installments if instalment_plan else 0,
                 "status": instalment_plan.status if instalment_plan else None
             } if instalment_plan else None,
@@ -243,113 +244,33 @@ class AdminGetTransactionDetailResource(Resource):
 
 
 class AdminUpdateTransactionStatusResource(Resource):
+    """Turned off (go-live review): Transaction statuses follow the payments and can't be set by hand."""
+
     @auth_required
-    def put(self, transaction_id):
-        """Update transaction status"""
-        current_admin = current_user()
-        
-        if current_admin.role != 'admin':
+    def put(self, *args, **kwargs):
+        if current_user().role != 'admin':
             return {"error": "Unauthorized"}, 403
-        
-        data = request.get_json()
-        new_status = data.get('status')
-        reason = data.get('reason', '')
-        
-        if new_status not in ['pending', 'approved', 'completed', 'failed', 'cancelled']:
-            return {"error": "Invalid status"}, 400
-        
-        transaction = Transaction.query.get(transaction_id)
-        if not transaction:
-            return {"error": "Transaction not found"}, 404
-        
-        old_status = transaction.status
-        transaction.status = new_status
-        
-        if new_status == 'completed':
-            transaction.completion_date = datetime.now()
-        
-        db.session.commit()
-        
-        return {
-            "message": f"Transaction status updated from {old_status} to {new_status}",
-            "transaction_id": transaction.transaction_id,
-            "status": new_status
-        }, 200
+        return {"error": "Transaction statuses follow the payments and can't be set by hand."}, 410
 
 
 class AdminUpdateDeliveryStatusResource(Resource):
+    """Turned off (go-live review): Delivery is confirmed by the merchant on their Orders screen; that's what makes the sale payable in their next settlement."""
+
     @auth_required
-    def put(self, transaction_id):
-        """Update delivery status and tracking number"""
-        current_admin = current_user()
-        
-        if current_admin.role != 'admin':
+    def put(self, *args, **kwargs):
+        if current_user().role != 'admin':
             return {"error": "Unauthorized"}, 403
-        
-        data = request.get_json()
-        delivery_status = data.get('delivery_status')
-        tracking_number = data.get('tracking_number', '')
-        
-        if delivery_status not in ['pending', 'processing', 'shipped', 'delivered', 'cancelled']:
-            return {"error": "Invalid delivery status"}, 400
-        
-        transaction = Transaction.query.get(transaction_id)
-        if not transaction:
-            return {"error": "Transaction not found"}, 404
-        
-        transaction.delivery_status = delivery_status
-        if tracking_number:
-            transaction.tracking_number = tracking_number
-        
-        db.session.commit()
-        
-        return {
-            "message": f"Delivery status updated to {delivery_status}",
-            "transaction_id": transaction.transaction_id,
-            "delivery_status": delivery_status,
-            "tracking_number": transaction.tracking_number
-        }, 200
+        return {"error": "Delivery is confirmed by the merchant on their Orders screen; that's what makes the sale payable in their next settlement."}, 410
 
 
 class AdminRefundTransactionResource(Resource):
+    """Turned off (go-live review): This didn't move any money. Rejecting a paid order refunds the down payment through Paystack; other refunds are done by hand for now."""
+
     @auth_required
-    def post(self, transaction_id):
-        """Process refund for transaction"""
-        current_admin = current_user()
-        
-        if current_admin.role != 'admin':
+    def post(self, *args, **kwargs):
+        if current_user().role != 'admin':
             return {"error": "Unauthorized"}, 403
-        
-        data = request.get_json()
-        refund_amount = data.get('refund_amount')
-        reason = data.get('reason', '')
-        
-        transaction = Transaction.query.get(transaction_id)
-        if not transaction:
-            return {"error": "Transaction not found"}, 404
-        
-        if transaction.status != 'completed':
-            return {"error": "Only completed transactions can be refunded"}, 400
-        
-        if not refund_amount or refund_amount <= 0:
-            return {"error": "Invalid refund amount"}, 400
-        
-        if refund_amount > transaction.amount:
-            return {"error": "Refund amount cannot exceed transaction amount"}, 400
-        
-        # Mark transaction as refunded
-        transaction.status = 'refunded'
-        
-        # Create refund record (you can create a Refund model)
-        
-        db.session.commit()
-        
-        return {
-            "message": f"Refund of {refund_amount} processed successfully",
-            "transaction_id": transaction.transaction_id,
-            "refund_amount": refund_amount,
-            "status": "refunded"
-        }, 200
+        return {"error": "This didn't move any money. Rejecting a paid order refunds the down payment through Paystack; other refunds are done by hand for now."}, 410
 
 
 class AdminExportTransactionsResource(Resource):

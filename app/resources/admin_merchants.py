@@ -1,4 +1,5 @@
 from flask_restful import Resource, request
+from ..services import merchant_fees
 from flask_praetorian import auth_required, current_user
 from app.models.user import User
 from app.models.instalment import InstalmentPlan
@@ -107,6 +108,8 @@ class AdminGetMerchantsResource(Resource):
         status = request.args.get('status', '', type=str)
         risk_level = request.args.get('risk_level', '', type=str)
         sort_by = request.args.get('sort_by', 'created_at', type=str)
+        if sort_by not in ('created_at', 'full_name', 'business_name', 'customer_id', 'merchant_id', 'status', 'kyc_status', 'city'):   # never sort by an arbitrary column
+            sort_by = 'created_at'
         sort_order = request.args.get('sort_order', 'desc', type=str)
         
         # Build query
@@ -166,6 +169,7 @@ class AdminGetMerchantsResource(Resource):
             
             merchants.append({
                 "id": merchant.id,
+                **merchant_fees.describe(merchant),   # fee tier (§6.1)
                 "merchant_id": merchant.merchant_id or f"M{merchant.id:04d}",
                 "business_name": merchant.business_name or "N/A",
                 "owner_name": merchant.owner_name or "N/A",
@@ -174,7 +178,7 @@ class AdminGetMerchantsResource(Resource):
                 "business_type": merchant.business_type or "N/A",
                 "kyc_status": merchant.kyc_status or "pending",
                 "risk_level": risk_level_calc,
-                "status": merchant.status if merchant.status in ['approved', 'active'] else 'pending',
+                "status": merchant.status or 'pending',
                 "total_gmv": float(total_gmv),
                 "total_transactions": total_transactions,
                 "active_plans": active_plans,
@@ -208,13 +212,12 @@ class AdminGetMerchantDetailResource(Resource):
             .filter(InstalmentPlan.merchant_id == merchant.id,
                    InstalmentPlan.status == 'completed').scalar() or 0
         
-        total_outstanding = db.session.query(func.sum(InstalmentPlan.remaining_amount))\
-            .filter(InstalmentPlan.merchant_id == merchant.id,
-                   InstalmentPlan.status == 'active').scalar() or 0
-        
-        total_commission = db.session.query(func.sum(InstalmentPlan.commission_amount))\
-            .filter(InstalmentPlan.merchant_id == merchant.id,
-                   InstalmentPlan.status == 'completed').scalar() or 0
+        # Outstanding balances and MDR earned come from the ledger
+        from app.services import ledger
+        total_outstanding = ledger.portfolio_totals(
+            InstalmentPlan.merchant_id == merchant.id, InstalmentPlan.status == 'active')['outstanding']
+        total_commission = ledger.portfolio_totals(
+            InstalmentPlan.merchant_id == merchant.id)['merchant_fees']
         
         total_products = merchant.total_products or 0
         active_plans = InstalmentPlan.query.filter_by(
@@ -251,6 +254,7 @@ class AdminGetMerchantDetailResource(Resource):
         return {
             "merchant": {
                 "id": merchant.id,
+                **merchant_fees.describe(merchant),   # fee tier (§6.1)
                 "merchant_id": merchant.merchant_id or f"M{merchant.id:04d}",
                 "business_name": merchant.business_name or "N/A",
                 "owner_name": merchant.owner_name or "N/A",
@@ -269,7 +273,7 @@ class AdminGetMerchantDetailResource(Resource):
                 "total_gmv": float(total_gmv),
                 "total_outstanding": float(total_outstanding),
                 "total_commission": float(total_commission),
-                "commission_rate": merchant.commission_rate or 10,
+                "commission_rate": merchant_fees.describe(merchant)["fee_percentage"],   # current tier (§6.1)
                 "total_products": total_products,
                 "active_plans": active_plans,
                 "pending_payout": float(merchant.pending_payout or 0)
@@ -298,72 +302,42 @@ class AdminUpdateMerchantStatusResource(Resource):
         merchant = User.query.filter_by(id=merchant_id, role='merchant').first()
         if not merchant:
             return {"error": "Merchant not found"}, 404
-        
+        from ..services import accounts
+        blocked = accounts.status_change_error(merchant, new_status)
+        if blocked:
+            return {"error": blocked}, 409
+        if len((reason or '').strip()) < 5:
+            return {"error": "Give a reason (at least 5 characters). It's kept with the change."}, 400
+        from .admin_customers import _log_status_change
+        _log_status_change(merchant, new_status, reason, current_admin)      # before: it records the old status
         merchant.status = new_status
         db.session.commit()
         
         return {
             "message": f"Merchant status updated to {new_status}",
             "merchant_id": merchant.id,
+            **merchant_fees.describe(merchant),   # fee tier (§6.1)
             "status": new_status
         }, 200
 
 
 class AdminUpdateMerchantCommissionResource(Resource):
+    """Turned off (go-live review): Merchant fees are set with the merchant fee tier (PUT /admin/merchants/<id>/fee-tier)."""
+
     @auth_required
-    def put(self, merchant_id):
-        """Update merchant commission rate"""
-        current_admin = current_user()
-        
-        if current_admin.role != 'admin':
+    def put(self, *args, **kwargs):
+        if current_user().role != 'admin':
             return {"error": "Unauthorized"}, 403
-        
-        data = request.get_json()
-        commission_rate = data.get('commission_rate')
-        
-        if not commission_rate or commission_rate < 0 or commission_rate > 100:
-            return {"error": "Invalid commission rate"}, 400
-        
-        merchant = User.query.filter_by(id=merchant_id, role='merchant').first()
-        if not merchant:
-            return {"error": "Merchant not found"}, 404
-        
-        merchant.commission_rate = commission_rate
-        db.session.commit()
-        
-        return {
-            "message": f"Commission rate updated to {commission_rate}%",
-            "merchant_id": merchant.id,
-            "commission_rate": commission_rate
-        }, 200
+        return {"error": 'Merchant fees are set with the merchant fee tier (PUT /admin/merchants/<id>/fee-tier).'}, 410
 
 
 class AdminAdjustMerchantReserveResource(Resource):
+    """Turned off (go-live review): Merchant reserves aren't supported; this never changed anything."""
+
     @auth_required
-    def put(self, merchant_id):
-        """Adjust merchant reserve amount"""
-        current_admin = current_user()
-        
-        if current_admin.role != 'admin':
+    def put(self, *args, **kwargs):
+        if current_user().role != 'admin':
             return {"error": "Unauthorized"}, 403
-        
-        data = request.get_json()
-        reserve_amount = data.get('reserve_amount')
-        reason = data.get('reason', '')
-        
-        if not reserve_amount or reserve_amount < 0:
-            return {"error": "Invalid reserve amount"}, 400
-        
-        merchant = User.query.filter_by(id=merchant_id, role='merchant').first()
-        if not merchant:
-            return {"error": "Merchant not found"}, 404
-        
-        # Store reserve amount (you may need to add this field to User model)
-        # merchant.reserve_amount = reserve_amount
-        db.session.commit()
-        
-        return {
-            "message": f"Reserve amount adjusted to GHS {reserve_amount}",
-            "merchant_id": merchant.id,
-            "reserve_amount": reserve_amount
-        }, 200
+        return {"error": "Merchant reserves aren't supported; this never changed anything."}, 410
+
+

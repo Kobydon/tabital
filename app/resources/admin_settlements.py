@@ -1,4 +1,5 @@
 from flask_restful import Resource, request
+from ..services import merchant_fees
 from flask_praetorian import auth_required, current_user
 from app.models.user import User
 from app.models.transaction import Transaction
@@ -139,8 +140,8 @@ class AdminGetSettlementsResource(Resource):
                 "merchant_email": merchant.business_email or merchant.email if merchant else "N/A",
                 "product_name": transaction.product_name,
                 "amount": float(transaction.amount),
-                "commission": float(transaction.amount * 0.1),  # 10% commission
-                "payout_amount": float(transaction.payout_amount) if transaction.payout_amount else float(transaction.amount * 0.9),
+                "commission": merchant_fees.transaction_split(transaction, merchant)[0],   # tier fee (§6.1)
+                "payout_amount": merchant_fees.transaction_split(transaction, merchant)[1],
                 "payment_status": transaction.payment_status,
                 "transaction_date": transaction.transaction_date.isoformat() if transaction.transaction_date else None,
                 "completion_date": transaction.completion_date.isoformat() if transaction.completion_date else None,
@@ -194,8 +195,8 @@ class AdminGetSettlementDetailResource(Resource):
                 "id": transaction.id,
                 "transaction_id": transaction.transaction_id,
                 "amount": float(transaction.amount),
-                "commission": float(transaction.amount * 0.1),
-                "payout_amount": float(transaction.payout_amount) if transaction.payout_amount else float(transaction.amount * 0.9),
+                "commission": merchant_fees.transaction_split(transaction)[0],
+                "payout_amount": merchant_fees.transaction_split(transaction)[1],
                 "payment_status": transaction.payment_status,
                 "transaction_date": transaction.transaction_date.isoformat() if transaction.transaction_date else None,
                 "completion_date": transaction.completion_date.isoformat() if transaction.completion_date else None,
@@ -220,90 +221,27 @@ class AdminGetSettlementDetailResource(Resource):
         }, 200
 
 
+_RETIRED = ("Settlements are paid through settlement batches now: review and approve them under "
+            "/admin/settlement-batches. Marking transactions as settled by hand is no longer allowed.")
+
+
 class AdminProcessSettlementResource(Resource):
     @auth_required
     def post(self):
-        """Process bulk settlements"""
-        current_admin = current_user()
-        
-        if current_admin.role != 'admin':
+        """Retired in Phase 5: this marked transactions 'settled' without sending any money."""
+        if current_user().role != 'admin':
             return {"error": "Unauthorized"}, 403
-        
-        data = request.get_json()
-        settlement_ids = data.get('settlement_ids', [])
-        payment_method = data.get('payment_method', 'bank_transfer')
-        notes = data.get('notes', '')
-        
-        if not settlement_ids:
-            return {"error": "No settlements selected"}, 400
-        
-        processed = []
-        failed = []
-        
-        for settlement_id in settlement_ids:
-            transaction = Transaction.query.get(settlement_id)
-            if not transaction or transaction.status != 'completed':
-                failed.append({"id": settlement_id, "reason": "Invalid transaction"})
-                continue
-            
-            if transaction.payment_status == 'settled':
-                failed.append({"id": settlement_id, "reason": "Already settled"})
-                continue
-            
-            transaction.payment_status = 'settled'
-            transaction.payment_method = payment_method
-            transaction.notes = notes
-            processed.append({
-                "id": transaction.id,
-                "transaction_id": transaction.transaction_id,
-                "amount": transaction.payout_amount
-            })
-        
-        db.session.commit()
-        
-        return {
-            "message": f"Processed {len(processed)} settlements successfully",
-            "processed": processed,
-            "failed": failed
-        }, 200
+        return {"error": _RETIRED}, 410
 
 
 class AdminProcessSingleSettlementResource(Resource):
     @auth_required
     def put(self, settlement_id):
-        """Process a single settlement"""
-        current_admin = current_user()
-        
-        if current_admin.role != 'admin':
+        """Retired in Phase 5: this marked a transaction 'settled' (and overwrote its customer
+        payment reference) without sending any money."""
+        if current_user().role != 'admin':
             return {"error": "Unauthorized"}, 403
-        
-        data = request.get_json()
-        payment_method = data.get('payment_method', 'bank_transfer')
-        payment_reference = data.get('payment_reference', '')
-        notes = data.get('notes', '')
-        
-        transaction = Transaction.query.get(settlement_id)
-        if not transaction or transaction.status != 'completed':
-            return {"error": "Settlement not found"}, 404
-        
-        if transaction.payment_status == 'settled':
-            return {"error": "Settlement already processed"}, 400
-        
-        transaction.payment_status = 'settled'
-        transaction.payment_method = payment_method
-        transaction.payment_reference = payment_reference
-        transaction.notes = notes
-        
-        db.session.commit()
-        
-        return {
-            "message": "Settlement processed successfully",
-            "transaction_id": transaction.transaction_id,
-            "payout_amount": transaction.payout_amount,
-            "payment_method": payment_method,
-            "payment_reference": payment_reference
-        }, 200
-
+        return {"error": _RETIRED}, 410
 
 class AdminExportSettlementsResource(Resource):
     @auth_required
@@ -358,8 +296,8 @@ class AdminExportSettlementsResource(Resource):
                 merchant.business_name if merchant else "N/A",
                 settlement.product_name,
                 settlement.amount,
-                settlement.amount * 0.1,
-                settlement.payout_amount if settlement.payout_amount else settlement.amount * 0.9,
+                merchant_fees.transaction_split(settlement, merchant)[0],
+                merchant_fees.transaction_split(settlement, merchant)[1],
                 settlement.payment_status,
                 settlement.transaction_date.strftime("%Y-%m-%d %H:%M:%S") if settlement.transaction_date else "",
                 settlement.completion_date.strftime("%Y-%m-%d %H:%M:%S") if settlement.completion_date else ""

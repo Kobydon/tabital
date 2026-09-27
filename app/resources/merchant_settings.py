@@ -1,4 +1,5 @@
 from flask_restful import Resource, request
+from ..services import merchant_fees
 from flask_praetorian import auth_required, current_user
 from ..models.user import User
 from ..models.transaction import Transaction
@@ -43,7 +44,7 @@ class MerchantGetProfileResource(Resource):
             "verified": safe_bool(current_merchant.verified),
             "kyc_status": safe_str(current_merchant.kyc_status),
             "verification_level": safe_str(current_merchant.verification_level),
-            "commission_rate": safe_float(current_merchant.commission_rate),
+            "commission_rate": merchant_fees.describe(current_merchant)["fee_percentage"],   # current tier (§6.1)
             "payment_method": safe_str(current_merchant.payment_method),
             "bank_name": safe_str(current_merchant.bank_name),
             "account_name": safe_str(current_merchant.account_name),
@@ -97,28 +98,10 @@ class MerchantUpdatePasswordResource(Resource):
         if current_merchant.role != "merchant":
             return {"error": "Unauthorized"}, 403
         
-        data = request.get_json()
-        current_password = data.get('current_password')
-        new_password = data.get('new_password')
-        
-        if not current_password or not new_password:
-            return {"error": "Current password and new password are required"}, 400
-        
-        # Verify current password
-        from flask_praetorian import Praetorian
-        guard = Praetorian()
-        
-        if not guard.authenticate(current_merchant.phone, current_password):
-            return {"error": "Current password is incorrect"}, 401
-        
-        if len(new_password) < 6:
-            return {"error": "New password must be at least 6 characters"}, 400
-        
-        # Update password
-        current_merchant.password = guard.encrypt_password(new_password)
-        db.session.commit()
-        
-        return {"message": "Password updated successfully"}, 200
+        from ..services.auth_service import change_password
+
+        data = request.get_json() or {}
+        return change_password(current_merchant, data.get('current_password'), data.get('new_password'))
 
 
 class MerchantUpdatePaymentSettingsResource(Resource):
@@ -130,26 +113,20 @@ class MerchantUpdatePaymentSettingsResource(Resource):
         if current_merchant.role != "merchant":
             return {"error": "Unauthorized"}, 403
         
-        data = request.get_json()
-        
-        # Bank Account Settings
-        if 'bank_name' in data:
-            current_merchant.bank_name = data['bank_name']
-        if 'account_name' in data:
-            current_merchant.account_name = data['account_name']
-        if 'account_number' in data:
-            current_merchant.account_number = data['account_number']
-        
-        # Mobile Money Settings
-        if 'momo_name' in data:
-            current_merchant.momo_name = data['momo_name']
-        if 'momo_number' in data:
-            current_merchant.momo_number = data['momo_number']
-        
+        from .merchant_payouts import PayoutError, apply_payout_details
+
+        data = request.get_json() or {}
+
+        # Payout details go through one validated path: a change pauses payouts for 48 hours
+        try:
+            apply_payout_details(current_merchant, data)
+        except PayoutError as e:
+            return {"error": str(e)}, 400
+
         # Default Payment Method
         if 'payment_method' in data:
             current_merchant.payment_method = data['payment_method']
-        
+
         db.session.commit()
         
         return {"message": "Payment settings updated successfully"}, 200
@@ -244,20 +221,8 @@ class MerchantUpdateKYCResource(Resource):
         if current_merchant.role != "merchant":
             return {"error": "Unauthorized"}, 403
         
-        data = request.get_json()
-        
-        # Update KYC fields
-        if 'kyc_status' in data:
-            current_merchant.kyc_status = data['kyc_status']
-        if 'verification_level' in data:
-            current_merchant.verification_level = data['verification_level']
-        
-        if data.get('kyc_status') == 'verified' and not current_merchant.kyc_completed_on:
-            current_merchant.kyc_completed_on = datetime.utcnow()
-        
-        db.session.commit()
-        
-        return {"message": "KYC information updated successfully"}, 200
+        # KYC status and verification level are set by Tabital after review, never by the merchant
+        return {"error": "KYC status is set by Tabital after document review"}, 403
 
 
 class MerchantUploadDocumentResource(Resource):

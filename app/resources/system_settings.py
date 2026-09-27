@@ -11,9 +11,9 @@ class SystemSettingsResource(Resource):
     def get(self):
         """Get all system settings"""
         current_admin = current_user()
-        
-        # if current_admin.role != 'admin':
-        #     return {"error": "Unauthorized"}, 403
+
+        if current_admin.role != 'admin':
+            return {"error": "Unauthorized"}, 403
         
         settings = SystemSetting.query.all()
         
@@ -33,37 +33,11 @@ class SystemSettingsResource(Resource):
     
     @auth_required
     def put(self):
-        """Update system settings"""
-        current_admin = current_user()
-        
-        if current_admin.role != 'admin':
+        """Retired: wrote any key and value without validation or an audit trail."""
+        if current_user().role != 'admin':
             return {"error": "Unauthorized"}, 403
-        
-        data = request.get_json()
-        
-        # Update each setting
-        for key, value in data.items():
-            if key == 'installment_options':
-                setting_type = 'json'
-                setting_value = json.dumps(value)
-            elif isinstance(value, bool):
-                setting_type = 'boolean'
-                setting_value = str(value)
-            elif isinstance(value, (int, float)):
-                setting_type = 'number'
-                setting_value = str(value)
-            else:
-                setting_type = 'string'
-                setting_value = str(value)
-            
-            SystemSetting.set_value(
-                key=key,
-                value=setting_value,
-                value_type=setting_type,
-                updated_by=current_admin.id
-            )
-        
-        return {"message": "Settings updated successfully"}, 200
+        return {"error": "Settings are changed on the Business Settings page now (validated, with a reason). "
+                         "Use PUT /admin/business-settings."}, 410
 
 
 class InstallmentOptionsResource(Resource):
@@ -81,24 +55,10 @@ class InstallmentOptionsResource(Resource):
     
     @auth_required
     def put(self):
-        """Update installment options"""
-        current_admin = current_user()
-        
-        if current_admin.role != 'admin':
+        """Retired: the plans on offer are fixed by the plan engine (Pay in 2/3/4 and full, §4)."""
+        if current_user().role != 'admin':
             return {"error": "Unauthorized"}, 403
-        
-        data = request.get_json()
-        options = data.get('installment_options', [])
-        
-        SystemSetting.set_value(
-            key="installment_options",
-            value=json.dumps(options),
-            value_type="json",
-            description="Available installment plan options",
-            updated_by=current_admin.id
-        )
-        
-        return {"message": "Installment options updated successfully"}, 200
+        return {"error": "Instalment options can't be edited: the plans on offer are set by the business rules (§4)."}, 410
 from flask import request
 from flask_restful import Resource
 from flask_praetorian import auth_required, current_user
@@ -111,181 +71,89 @@ class InstallmentCalculatorResource(Resource):
     def post(self):
         """Calculate installment plan"""
 
-        current_user_obj = current_user()
+        from ..services import plan_engine, risk
 
+        current_user_obj = current_user()
         data = request.get_json() or {}
 
-        product_price = float(data.get('product_price', 0))
-        quantity = int(data.get('quantity', 1))
-        number_of_installments = int(data.get('number_of_installments', 1))
+        # A customer's quote uses their risk tier's Pay in 4 down payment, so the Shop
+        # shows exactly what /customer/purchase will charge
+        tier_dp_rate = None
+        credit = None
+        if current_user_obj.role == 'customer':
+            decision, _ = risk.decide(current_user_obj)
+            credit = risk.decision_view(decision)
+            if decision.eligible:
+                tier_dp_rate = decision.pay_in_4_dp_rate
 
-        if product_price <= 0:
-            return {"error": "Valid product price is required"}, 400
+        try:
+            product_price = plan_engine.money(data.get('product_price', 0))
+            quantity = int(data.get('quantity', 1))
+            number_of_installments = int(data.get('number_of_installments', 1))
+            # A merchant sees their own tier's fee; customers never see merchant figures (below)
+            mdr = None
+            if current_user_obj.role == 'merchant':
+                from ..services import merchant_fees
+                mdr = merchant_fees.rate_for(current_user_obj)
+            plan = plan_engine.quote(product_price, quantity, number_of_installments, SystemSetting.get_value,
+                                     pay_in_4_dp_rate=tier_dp_rate, in_store=bool(data.get('in_store')), mdr=mdr)
+        except (plan_engine.PlanError, ArithmeticError, TypeError, ValueError) as e:
+            return {"error": str(e) or "Invalid plan request"}, 400
 
-        # Product total
-        total_price = product_price * quantity
+        f = float
+        late_fee_percentage = f(SystemSetting.get_value("late_fee_percentage", 10))
 
-        # System settings
-        merchant_fee_percentage = float(
-            SystemSetting.get_value("merchant_fee_percentage", 10)
-        )
-
-        late_fee_percentage = float(
-            SystemSetting.get_value("late_fee_percentage", 10)
-        )
-
-        service_fee = float(
-            SystemSetting.get_value("service_fee", 0)
-        )
-
-        delivery_fee = 50.0
-
-        # ==========================================
-        # DOWN PAYMENT RULES
-        # ==========================================
-
-        if number_of_installments == 1:
-            down_payment_percentage = 100
-
-        elif number_of_installments in [2, 3]:
-            down_payment_percentage = 50
-
-        elif number_of_installments == 4:
-            down_payment_percentage = 40
-
-        else:
-            return {
-                "error": "Only 1, 2, 3 and 4 installment plans are supported"
-            }, 400
-
-        # ==========================================
-        # CALCULATIONS
-        # ==========================================
-
-        product_down_payment = (
-            total_price * down_payment_percentage / 100
-        )
-
-        due_now_amount = (
-            product_down_payment + delivery_fee
-        )
-
-        remaining_balance = (
-            total_price - product_down_payment
-        )
-
-        remaining_installments = max(
-            number_of_installments - 1,
-            0
-        )
-
-        installment_amount = (
-            remaining_balance / remaining_installments
-            if remaining_installments > 0
-            else 0
-        )
-
-        merchant_fee_amount = (
-            total_price * merchant_fee_percentage / 100
-        )
-
-        merchant_payout = (
-            total_price - merchant_fee_amount
-        )
-
-        total_payable = (
-            total_price + delivery_fee + service_fee
-        )
-
-        # ==========================================
-        # PAYMENT SCHEDULE
-        # ==========================================
-
-        payment_schedule = []
-
-        current_date = datetime.now()
-
-        # First payment
-        payment_schedule.append({
-            "installment_number": 1,
-            "amount": round(due_now_amount, 2),
-            "due_date": current_date.strftime("%Y-%m-%d"),
-            "status": "due_now",
-            "description": f"{down_payment_percentage}% Down Payment + Delivery Fee"
-        })
-
-        # Remaining payments
-        for i in range(1, remaining_installments + 1):
-
-            due_date = current_date + timedelta(days=(30 * i))
-
-            if number_of_installments == 2:
-                description = "Final Payment (Remaining 50%)"
-
-            elif number_of_installments == 3:
-                description = f"Payment {i + 1} of 3 (25%)"
-
-            elif number_of_installments == 4:
-                description = f"Payment {i + 1} of 4 (20%)"
-
-            else:
-                description = f"Installment {i + 1}"
-
-            payment_schedule.append({
-                "installment_number": i + 1,
-                "amount": round(installment_amount, 2),
-                "due_date": due_date.strftime("%Y-%m-%d"),
-                "status": "pending",
-                "description": description
-            })
-
+        # This is a quote only. /customer/purchase recalculates from the stored product price.
         return {
-            "product_price": round(total_price, 2),
-
+            "product_price": f(plan["price"]),
             "down_payment": {
-                "percentage": down_payment_percentage,
-                "amount": round(due_now_amount, 2)
+                "percentage": f(plan["down_payment_rate"] * 100),
+                "amount": f(plan["down_payment"])
             },
-
-            "remaining_balance": round(
-                remaining_balance,
-                2
-            ),
-
+            "due_now": f(plan["due_now"]),
+            "remaining_balance": f(plan["financed_balance"]),
             "installment_details": {
-                "total_installments": number_of_installments,
-                "remaining_installments": remaining_installments,
-                "installment_amount": round(
-                    installment_amount,
-                    2
-                )
+                "total_installments": plan["n_payments"],
+                "remaining_installments": plan["deferred_payments"],
+                "installment_amount": f(plan["installment_amount"])
             },
-
             "fees": {
-                "service_fee": service_fee,
-                "delivery_fee": delivery_fee,
-                "merchant_fee_percentage": merchant_fee_percentage,
-                "merchant_fee_amount": round(
-                    merchant_fee_amount,
-                    2
-                ),
+                "service_fee": f(plan["service_fee"]),
+                "delivery_fee": f(plan["delivery_fee"]),
                 "late_fee_percentage": late_fee_percentage
             },
-
             "totals": {
-                "total_payable": round(
-                    total_payable,
-                    2
-                ),
-                "merchant_payout": round(
-                    merchant_payout,
-                    2
-                )
+                "total_payable": f(plan["total_payable"]),
             },
-
-            "payment_schedule": payment_schedule
-
+            # Merchant side only for merchants (their own tier) and admins; never in a customer's quote
+            **({"merchant": {"fee_percentage": f(plan["merchant_fee_rate"] * 100),
+                             "fee_amount": f(plan["merchant_fee"]), "payout": f(plan["merchant_settlement"])}}
+               if current_user_obj.role in ('merchant', 'admin') else {}),
+            "payment_schedule": plan_engine.schedule_to_json(plan["schedule"]),
+            # For customers: eligibility and available limit, so the Shop can warn before checkout
+            "credit": credit,
+            # Key facts shown before the customer commits (§10, §12: rates come from settings, not UI copy)
+            "key_facts": _key_facts(late_fee_percentage),
         }, 200
+
+
+def _key_facts(late_fee_percentage):
+    from flask import current_app
+    g = SystemSetting.get_value
+    return {
+        "late_fee_percentage": late_fee_percentage,
+        "second_late_fee_percentage": float(g("second_late_fee_percentage", 10)),
+        "second_late_fee_after_days": int(g("second_late_fee_after_days", 31)),
+        "late_fee_cap_percentage": float(g("late_fee_cap_percentage", 25)),
+        "deferment_enabled": bool(g("deferment_enabled", True)),
+        "deferment_fee_percentage": float(g("deferment_fee_percentage", 10)),
+        "deferment_max_per_plan": int(g("deferment_max_per_plan", 1)),
+        "deferment_months": int(g("deferment_months", 1)),
+        "dispute_resolution_days": int(g("dispute_resolution_days", 21)),
+        "terms_url": current_app.config.get("TERMS_URL"),
+        "terms_version": current_app.config.get("TERMS_VERSION"),
+        "privacy_url": current_app.config.get("PRIVACY_POLICY_URL"),
+    }
 
 class LateFeeCalculatorResource(Resource):
     @auth_required

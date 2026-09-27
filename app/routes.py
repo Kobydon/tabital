@@ -145,7 +145,6 @@ from .resources.admin_customers import (
     AdminGetCustomersResource,
     AdminGetCustomerDetailResource,
     AdminUpdateCustomerStatusResource,
-    AdminUpdateCustomerCreditLimitResource,
     AdminAddCustomerNoteResource
 )
 
@@ -190,7 +189,6 @@ from .resources.customer_dashboard import (
     CustomerRecentTransactionsResource,
     CustomerInstalmentsResource,
     CustomerPlanDetailsResource,
-    CustomerMakePaymentResource
 )
 
 from .resources.customer_profile import (
@@ -285,7 +283,8 @@ from .resources.merchant_orders import (
 )
 from .resources.customer_purchase import (
     CustomerPurchaseResource,
-    CustomerGetOrdersResource
+    CustomerGetOrdersResource,
+    CustomerPayOrderResource
 )
 # routes.py - Add these imports
 from .resources.customer_product import (
@@ -427,8 +426,171 @@ from app.resources.admin_collection import (
 # ============================================
 
 
+from .resources.paystack_payments import (
+    CustomerPaymentConfigResource,
+    CustomerPaystackInitializeResource,
+    CustomerPaystackVerifyResource,
+    PaystackWebhookResource
+)
+
+
+from .resources.underwriting import (
+    CustomerCreditResource,
+    CustomerUnderwritingDetailsResource,
+    AdminCustomerUnderwritingResource,
+    AdminRerunUnderwritingResource,
+    AdminCreditLimitOverrideResource
+)
+
+
+from .resources.servicing import (
+    CustomerPaymentMethodsResource,
+    CustomerPaymentMethodResource,
+    CustomerDisputesResource,
+    AdminDisputesResource,
+    AdminResolveDisputeResource,
+    AdminRunServicingResource,
+    AdminMessagesResource
+)
+
+
+from .resources.merchant_payouts import (
+    MerchantPayoutAccountResource,
+    MerchantPayoutBanksResource,
+    MerchantSettlementBatchesResource,
+    MerchantSettlementBatchResource,
+    MerchantStatementResource,
+    AdminSettlementBatchesResource,
+    AdminGenerateSettlementsResource,
+    AdminSettlementBatchResource,
+    AdminApproveSettlementResource,
+    MerchantPaymentLinksResource,
+    MerchantPaymentLinkResource,
+    CustomerPaymentLinkResource
+)
+from .resources.identity_fraud import (
+    CustomerIdentityResource,
+    CustomerIdentityStartResource,
+    CustomerIdentitySubmittedResource,
+    SmileIDWebhookResource,
+    AdminIdentityChecksResource,
+    AdminIdentityDecideResource,
+    AdminEmploymentVerificationResource,
+    AdminFraudSignalsResource,
+    AdminFraudSignalResource
+)
+
+
+from .resources.deferments import CustomerDefermentResource, AdminDefermentsResource
+
+
+from .resources.economics import (
+    AdminEconomicsSummaryResource,
+    AdminEconomicsExportResource,
+    AdminEconomicsPortfolioResource,
+    AdminEconomicsCohortsResource,
+    AdminEconomicsScenarioResource
+)
+
+
+from .resources.business_settings import AdminBusinessSettingsResource, AdminBusinessSettingsHistoryResource
+
+
+from .resources.customer_product import CustomerPlanOptionsResource
+from .resources.pii import AdminPiiRevealResource, AdminPiiAccessLogResource
+
+
 def register_routes(app):
     api = Api(app)
+
+    # Vault shop: every plan for a product, priced by the server, to compare side by side
+    api.add_resource(CustomerPlanOptionsResource, "/customer/plan-options")
+
+    # Masked personal data on admin screens: reveal one value with a reason (logged)
+    from .resources.payment_claims import (AdminPaymentClaimsResource, AdminPaymentClaimConfirmResource,
+                                           AdminPaymentClaimRejectResource)
+    api.add_resource(AdminPaymentClaimsResource, "/admin/payment-claims")
+    api.add_resource(AdminPaymentClaimConfirmResource, "/admin/payment-claims/<int:claim_id>/confirm")
+    api.add_resource(AdminPaymentClaimRejectResource, "/admin/payment-claims/<int:claim_id>/reject")
+    from .resources.merchant_fee_tiers import AdminMerchantFeeTiersResource, AdminMerchantFeeTierResource
+    api.add_resource(AdminMerchantFeeTiersResource, "/admin/merchant-fee-tiers")
+    api.add_resource(AdminMerchantFeeTierResource, "/admin/merchants/<int:merchant_id>/fee-tier")
+    from .resources.admin_team import AdminTeamResource, AdminTeamMemberResource
+    api.add_resource(AdminTeamResource, "/admin/team")
+    api.add_resource(AdminTeamMemberResource, "/admin/team/<int:admin_id>")
+    api.add_resource(AdminPiiRevealResource, "/admin/pii/reveal")
+    api.add_resource(AdminPiiAccessLogResource, "/admin/pii/access-log")
+
+    # Business settings: validated, audited (replaces the broken /api/system-settings page)
+    api.add_resource(AdminBusinessSettingsResource, "/admin/business-settings")
+    api.add_resource(AdminBusinessSettingsHistoryResource, "/admin/business-settings/history")
+
+    # Unit economics and portfolio reporting (Phase 7)
+    api.add_resource(AdminEconomicsSummaryResource, "/admin/economics/summary")
+    api.add_resource(AdminEconomicsExportResource, "/admin/economics/export")
+    api.add_resource(AdminEconomicsPortfolioResource, "/admin/economics/portfolio")
+    api.add_resource(AdminEconomicsCohortsResource, "/admin/economics/cohorts")
+    api.add_resource(AdminEconomicsScenarioResource, "/admin/economics/scenario")
+
+    # Instalment deferment (§4)
+    api.add_resource(CustomerDefermentResource, "/customer/plans/<int:plan_id>/deferment")
+    api.add_resource(AdminDefermentsResource, "/admin/deferments")
+
+    # ============================================
+    # IDENTITY (Smile ID) AND FRAUD CHECKS (Phase 6)
+    # ============================================
+    api.add_resource(CustomerIdentityResource, "/customer/identity")
+    api.add_resource(CustomerIdentityStartResource, "/customer/identity/start")
+    api.add_resource(CustomerIdentitySubmittedResource, "/customer/identity/<int:check_id>/submitted")
+    api.add_resource(SmileIDWebhookResource, "/webhooks/smileid")
+    api.add_resource(AdminIdentityChecksResource, "/admin/identity-checks")
+    api.add_resource(AdminIdentityDecideResource, "/admin/identity-checks/<int:check_id>/decide")
+    api.add_resource(AdminEmploymentVerificationResource, "/admin/customers/<int:customer_id>/employment-verification")
+    api.add_resource(AdminFraudSignalsResource, "/admin/fraud-signals")
+    api.add_resource(AdminFraudSignalResource, "/admin/fraud-signals/<int:signal_id>")
+
+    # ============================================
+    # MERCHANT SETTLEMENTS, PAYOUTS, PAYMENT LINKS (Phase 5)
+    # ============================================
+    api.add_resource(MerchantPayoutAccountResource, "/merchant/payout-account")
+    api.add_resource(MerchantPayoutBanksResource, "/merchant/payout-banks")
+    api.add_resource(MerchantSettlementBatchesResource, "/merchant/settlement-batches")
+    api.add_resource(MerchantSettlementBatchResource, "/merchant/settlement-batches/<int:batch_id>")
+    api.add_resource(MerchantStatementResource, "/merchant/statement")
+    api.add_resource(AdminSettlementBatchesResource, "/admin/settlement-batches")
+    api.add_resource(AdminGenerateSettlementsResource, "/admin/settlement-batches/generate")
+    api.add_resource(AdminSettlementBatchResource, "/admin/settlement-batches/<int:batch_id>")
+    api.add_resource(AdminApproveSettlementResource, "/admin/settlement-batches/<int:batch_id>/approve")
+    api.add_resource(MerchantPaymentLinksResource, "/merchant/payment-links")
+    api.add_resource(MerchantPaymentLinkResource, "/merchant/payment-links/<int:link_id>")
+    api.add_resource(CustomerPaymentLinkResource, "/customer/payment-links/<string:token>")
+
+    # ============================================
+    # SERVICING: autopay cards, disputes, daily job (Phase 4)
+    # ============================================
+    api.add_resource(CustomerPaymentMethodsResource, "/customer/payment-methods")
+    api.add_resource(CustomerPaymentMethodResource, "/customer/payment-methods/<int:method_id>")
+    api.add_resource(CustomerDisputesResource, "/customer/disputes")
+    api.add_resource(AdminDisputesResource, "/admin/disputes")
+    api.add_resource(AdminResolveDisputeResource, "/admin/disputes/<int:dispute_id>/resolve")
+    api.add_resource(AdminRunServicingResource, "/admin/servicing/run")
+    api.add_resource(AdminMessagesResource, "/admin/messages")
+
+    # ============================================
+    # UNDERWRITING (Phase 3)
+    # ============================================
+    api.add_resource(CustomerCreditResource, "/customer/credit")
+    api.add_resource(CustomerUnderwritingDetailsResource, "/customer/underwriting")
+    api.add_resource(AdminCustomerUnderwritingResource, "/admin/customers/<int:customer_id>/underwriting")
+    api.add_resource(AdminRerunUnderwritingResource, "/admin/customers/<int:customer_id>/underwriting/rerun")
+
+    # ============================================
+    # PAYSTACK (Phase 2)
+    # ============================================
+    api.add_resource(CustomerPaymentConfigResource, "/customer/payments/config")
+    api.add_resource(CustomerPaystackInitializeResource, "/customer/payments/paystack/initialize")
+    api.add_resource(CustomerPaystackVerifyResource, "/customer/payments/paystack/verify/<string:reference>")
+    api.add_resource(PaystackWebhookResource, "/webhooks/paystack")
 
     # ============================================
     # AUTHENTICATION ROUTES
@@ -447,20 +609,20 @@ def register_routes(app):
     # ============================================
     # ADMIN - CUSTOMER ROUTES
     # ============================================
-    api.add_resource(GetCustomersResource, "/admin/customers")
+    # api.add_resource(GetCustomersResource, "/admin/customers")   # old duplicate: shadowed the current endpoint (admin_customers/admin_merchants)
     api.add_resource(CustomerResource, "/admin/customers/<int:customer_id>")
     api.add_resource(BulkUpdateCustomersResource, "/admin/customers/bulk-update")
     api.add_resource(SearchCustomersResource, "/admin/customers/search")
-    api.add_resource(CustomerStatsResource, "/admin/customers/stats")
+    # api.add_resource(CustomerStatsResource, "/admin/customers/stats")   # old duplicate: shadowed the current endpoint (admin_customers/admin_merchants)
     api.add_resource(ExportCustomersResource, "/admin/customers/export")
 
     # ============================================
     # ADMIN - MERCHANT ROUTES
     # ============================================
-    api.add_resource(GetMerchantsResource, "/admin/merchants")
+    # api.add_resource(GetMerchantsResource, "/admin/merchants")   # old duplicate: shadowed the current endpoint (admin_customers/admin_merchants)
     api.add_resource(MerchantResource, "/admin/merchants/<int:merchant_id>")
     api.add_resource(VerifyMerchantResource, "/admin/merchants/verify/<int:merchant_id>")
-    api.add_resource(MerchantStatsResource, "/admin/merchants/stats")
+    # api.add_resource(MerchantStatsResource, "/admin/merchants/stats")   # old duplicate: shadowed the current endpoint (admin_customers/admin_merchants)
     
     api.add_resource(MerchantKYCResource, "/admin/merchants/<int:merchant_id>/kyc")
     api.add_resource(MerchantCommissionResource, "/admin/merchants/<int:merchant_id>/commission")
@@ -670,6 +832,7 @@ def register_routes(app):
     # ============================================
     api.add_resource(CustomerPurchaseResource, "/customer/purchase")
     api.add_resource(CustomerGetOrdersResource, "/customer/orders")
+    api.add_resource(CustomerPayOrderResource, "/customer/orders/<int:order_id>/pay")
 
 
 
@@ -785,7 +948,7 @@ def register_routes(app):
     api.add_resource(AdminGetCustomersResource, '/admin/customers')
     api.add_resource(AdminGetCustomerDetailResource, '/admin/customers/<int:customer_id>')
     api.add_resource(AdminUpdateCustomerStatusResource, '/admin/customers/<int:customer_id>/status')
-    api.add_resource(AdminUpdateCustomerCreditLimitResource, '/admin/customers/<int:customer_id>/credit-limit')
+    api.add_resource(AdminCreditLimitOverrideResource, '/admin/customers/<int:customer_id>/credit-limit')
     api.add_resource(AdminAddCustomerNoteResource, '/admin/customers/<int:customer_id>/note')
 
 

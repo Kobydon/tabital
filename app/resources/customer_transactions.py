@@ -315,8 +315,8 @@ class CustomerGetPaymentSummaryResource(Resource):
         
         for plan in instalment_plans:
             total_commitment += plan.total_amount
-            total_paid += (plan.total_amount - plan.remaining_amount)
-            total_remaining += plan.remaining_amount
+            total_paid += (plan.paid_to_date)
+            total_remaining += plan.outstanding_balance
             
             if plan.status == 'active':
                 active_plans += 1

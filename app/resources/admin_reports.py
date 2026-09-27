@@ -13,125 +13,84 @@ from flask import make_response
 import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment
 
+def _revenue(start, last_day=None):
+    """Ledger revenue from `start` to the end of `last_day` (inclusive), as a float for JSON/CSV."""
+    from app.services import economics
+    end = (last_day.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)) if last_day else None
+    return float(economics.revenue_between(start, end)["total"])
+
+
+def _plans(start, last_day):
+    """Plans opened from `start` to the end of `last_day`: the count shown next to revenue."""
+    from app.services import economics
+    end = last_day.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
+    return economics.revenue_between(start, end)["plans"]
+
+
+def _period_buckets(period, year):
+    """[(label, date_key, start, end_exclusive)] for the revenue report."""
+    now = datetime.utcnow()
+    today = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    if period == 'daily':
+        return [((today - timedelta(days=i)).strftime("%d %b"), (today - timedelta(days=i)).strftime("%Y-%m-%d"),
+                 today - timedelta(days=i), today - timedelta(days=i - 1)) for i in range(29, -1, -1)]
+    if period == 'weekly':
+        monday = today - timedelta(days=today.weekday())
+        out = []
+        for i in range(11, -1, -1):
+            s = monday - timedelta(weeks=i)
+            out.append((f"w/c {s.strftime('%d %b')}", s.strftime("%Y-%m-%d"), s, s + timedelta(weeks=1)))
+        return out
+    if period == 'yearly':
+        return [(str(y), str(y), datetime(y, 1, 1), datetime(y + 1, 1, 1)) for y in range(now.year - 4, now.year + 1)]
+    out = []
+    for m in range(1, 13):
+        s = datetime(year, m, 1)
+        e = datetime(year + 1, 1, 1) if m == 12 else datetime(year, m + 1, 1)
+        out.append((s.strftime("%b"), s.strftime("%Y-%m"), s, e))
+    return out
+
+
 class AdminReportRevenueResource(Resource):
     @auth_required
     def get(self):
-        """Get revenue report"""
-        current_admin = current_user()
-        
-        if current_admin.role != 'admin':
+        """Revenue by period, from the ledger (the same basis as Unit economics):
+        merchant fees on plans opened + late fees net of waivers + deferment fees."""
+        from app.services import economics
+
+        if current_user().role != 'admin':
             return {"error": "Unauthorized"}, 403
-        
-        # Get query parameters
-        period = request.args.get('period', 'monthly')  # daily, weekly, monthly, yearly
-        year = request.args.get('year', type=int)
-        month = request.args.get('month', type=int)
-        
-        if not year:
-            year = datetime.now().year
-        
-        # Calculate revenue by period
+
+        period = request.args.get('period', 'monthly')
+        if period not in ('daily', 'weekly', 'monthly', 'yearly'):
+            period = 'monthly'
+        year = request.args.get('year', type=int) or datetime.utcnow().year
+
         revenue_data = []
-        
-        if period == 'daily':
-            # Get last 30 days
-            for i in range(30, 0, -1):
-                date = datetime.now() - timedelta(days=i)
-                start_date = date.replace(hour=0, minute=0, second=0, microsecond=0)
-                end_date = date.replace(hour=23, minute=59, second=59, microsecond=999999)
-                
-                revenue = db.session.query(func.sum(Transaction.amount * 0.1))\
-                    .filter(Transaction.status == 'completed',
-                           Transaction.completion_date.between(start_date, end_date)).scalar() or 0
-                
-                revenue_data.append({
-                    "date": date.strftime("%Y-%m-%d"),
-                    "label": date.strftime("%d %b"),
-                    "revenue": float(revenue),
-                    "transactions": Transaction.query.filter(
-                        Transaction.status == 'completed',
-                        Transaction.completion_date.between(start_date, end_date)
-                    ).count()
-                })
-        
-        elif period == 'weekly':
-            # Get last 12 weeks
-            for i in range(12, 0, -1):
-                start_date = datetime.now() - timedelta(weeks=i)
-                end_date = start_date + timedelta(days=6)
-                
-                revenue = db.session.query(func.sum(Transaction.amount * 0.1))\
-                    .filter(Transaction.status == 'completed',
-                           Transaction.completion_date.between(start_date, end_date)).scalar() or 0
-                
-                revenue_data.append({
-                    "date": start_date.strftime("%Y-%m-%d"),
-                    "label": f"Week {i}",
-                    "revenue": float(revenue),
-                    "transactions": Transaction.query.filter(
-                        Transaction.status == 'completed',
-                        Transaction.completion_date.between(start_date, end_date)
-                    ).count()
-                })
-        
-        elif period == 'monthly':
-            # Get all months in year
-            for month_num in range(1, 13):
-                start_date = datetime(year, month_num, 1)
-                if month_num == 12:
-                    end_date = datetime(year + 1, 1, 1) - timedelta(days=1)
-                else:
-                    end_date = datetime(year, month_num + 1, 1) - timedelta(days=1)
-                
-                revenue = db.session.query(func.sum(Transaction.amount * 0.1))\
-                    .filter(Transaction.status == 'completed',
-                           Transaction.completion_date.between(start_date, end_date)).scalar() or 0
-                
-                revenue_data.append({
-                    "date": start_date.strftime("%Y-%m"),
-                    "label": start_date.strftime("%b"),
-                    "revenue": float(revenue),
-                    "transactions": Transaction.query.filter(
-                        Transaction.status == 'completed',
-                        Transaction.completion_date.between(start_date, end_date)
-                    ).count()
-                })
-        
-        elif period == 'yearly':
-            # Get last 5 years
-            current_year = datetime.now().year
-            for yr in range(current_year - 4, current_year + 1):
-                start_date = datetime(yr, 1, 1)
-                end_date = datetime(yr, 12, 31, 23, 59, 59)
-                
-                revenue = db.session.query(func.sum(Transaction.amount * 0.1))\
-                    .filter(Transaction.status == 'completed',
-                           Transaction.completion_date.between(start_date, end_date)).scalar() or 0
-                
-                revenue_data.append({
-                    "date": str(yr),
-                    "label": str(yr),
-                    "revenue": float(revenue),
-                    "transactions": Transaction.query.filter(
-                        Transaction.status == 'completed',
-                        Transaction.completion_date.between(start_date, end_date)
-                    ).count()
-                })
-        
-        # Total revenue
+        for label, key, start, end in _period_buckets(period, year):
+            r = economics.revenue_between(start, end)
+            revenue_data.append({
+                "date": key,
+                "label": label,
+                "revenue": float(r["total"]),
+                "merchant_fees": float(r["merchant_fees"]),
+                "late_fees": float(r["late_fees"]),
+                "deferment_fees": float(r["deferment_fees"]),
+                "transactions": r["plans"],          # plans opened in the period
+            })
+
         total_revenue = sum(d["revenue"] for d in revenue_data)
-        
-        # Growth calculation
-        current_period_revenue = revenue_data[-1]["revenue"] if revenue_data else 0
-        previous_period_revenue = revenue_data[-2]["revenue"] if len(revenue_data) > 1 else 0
-        growth = ((current_period_revenue - previous_period_revenue) / previous_period_revenue * 100) if previous_period_revenue > 0 else 0
-        
+        current = revenue_data[-1]["revenue"] if revenue_data else 0
+        previous = revenue_data[-2]["revenue"] if len(revenue_data) > 1 else 0
+        growth = ((current - previous) / previous * 100) if previous > 0 else 0
+
         return {
             "revenue_data": revenue_data,
-            "total_revenue": float(total_revenue),
+            "total_revenue": round(total_revenue, 2),
             "growth": round(growth, 1),
             "period": period,
-            "year": year
+            "year": year,
+            "basis": "ledger: merchant fees on plans opened + late fees (net of waivers) + deferment fees",
         }, 200
 
 
@@ -153,9 +112,9 @@ class AdminReportTransactionsResource(Resource):
             for month_num in range(1, 13):
                 start_date = datetime(year, month_num, 1)
                 if month_num == 12:
-                    end_date = datetime(year + 1, 1, 1) - timedelta(days=1)
+                    end_date = datetime(year + 1, 1, 1) - timedelta(microseconds=1)   # end of the last day
                 else:
-                    end_date = datetime(year, month_num + 1, 1) - timedelta(days=1)
+                    end_date = datetime(year, month_num + 1, 1) - timedelta(microseconds=1)   # end of the last day
                 
                 total = Transaction.query.filter(
                     Transaction.completion_date.between(start_date, end_date)
@@ -210,9 +169,9 @@ class AdminReportCustomersResource(Resource):
             for month_num in range(1, 13):
                 start_date = datetime(year, month_num, 1)
                 if month_num == 12:
-                    end_date = datetime(year + 1, 1, 1) - timedelta(days=1)
+                    end_date = datetime(year + 1, 1, 1) - timedelta(microseconds=1)   # end of the last day
                 else:
-                    end_date = datetime(year, month_num + 1, 1) - timedelta(days=1)
+                    end_date = datetime(year, month_num + 1, 1) - timedelta(microseconds=1)   # end of the last day
                 
                 new_customers = User.query.filter(
                     User.role == 'customer',
@@ -261,9 +220,9 @@ class AdminReportMerchantsResource(Resource):
             for month_num in range(1, 13):
                 start_date = datetime(year, month_num, 1)
                 if month_num == 12:
-                    end_date = datetime(year + 1, 1, 1) - timedelta(days=1)
+                    end_date = datetime(year + 1, 1, 1) - timedelta(microseconds=1)   # end of the last day
                 else:
-                    end_date = datetime(year, month_num + 1, 1) - timedelta(days=1)
+                    end_date = datetime(year, month_num + 1, 1) - timedelta(microseconds=1)   # end of the last day
                 
                 new_merchants = User.query.filter(
                     User.role == 'merchant',
@@ -311,9 +270,9 @@ class AdminReportInstalmentsResource(Resource):
             for month_num in range(1, 13):
                 start_date = datetime(year, month_num, 1)
                 if month_num == 12:
-                    end_date = datetime(year + 1, 1, 1) - timedelta(days=1)
+                    end_date = datetime(year + 1, 1, 1) - timedelta(microseconds=1)   # end of the last day
                 else:
-                    end_date = datetime(year, month_num + 1, 1) - timedelta(days=1)
+                    end_date = datetime(year, month_num + 1, 1) - timedelta(microseconds=1)   # end of the last day
                 
                 new_plans = InstalmentPlan.query.filter(
                     InstalmentPlan.created_at.between(start_date, end_date)
@@ -377,18 +336,13 @@ class AdminReportDownloadResource(Resource):
             for month_num in range(1, 13):
                 month_start = datetime(year, month_num, 1)
                 if month_num == 12:
-                    month_end = datetime(year + 1, 1, 1) - timedelta(days=1)
+                    month_end = datetime(year + 1, 1, 1) - timedelta(microseconds=1)   # end of the last day
                 else:
-                    month_end = datetime(year, month_num + 1, 1) - timedelta(days=1)
+                    month_end = datetime(year, month_num + 1, 1) - timedelta(microseconds=1)   # end of the last day
                 
-                revenue = db.session.query(func.sum(Transaction.amount * 0.1))\
-                    .filter(Transaction.status == 'completed',
-                           Transaction.completion_date.between(month_start, month_end)).scalar() or 0
+                revenue = _revenue(month_start, month_end)
                 
-                transactions = Transaction.query.filter(
-                    Transaction.status == 'completed',
-                    Transaction.completion_date.between(month_start, month_end)
-                ).count()
+                transactions = _plans(month_start, month_end)      # plans opened, as on screen
                 
                 writer.writerow([month_start.strftime("%b %Y"), f"{revenue:.2f}", transactions, ""])
         
@@ -398,9 +352,9 @@ class AdminReportDownloadResource(Resource):
             for month_num in range(1, 13):
                 start_date = datetime(year, month_num, 1)
                 if month_num == 12:
-                    end_date = datetime(year + 1, 1, 1) - timedelta(days=1)
+                    end_date = datetime(year + 1, 1, 1) - timedelta(microseconds=1)   # end of the last day
                 else:
-                    end_date = datetime(year, month_num + 1, 1) - timedelta(days=1)
+                    end_date = datetime(year, month_num + 1, 1) - timedelta(microseconds=1)   # end of the last day
                 
                 total = Transaction.query.filter(
                     Transaction.created_at.between(start_date, end_date)
@@ -453,18 +407,13 @@ class AdminReportDownloadResource(Resource):
             for month_num in range(1, 13):
                 start_date = datetime(year, month_num, 1)
                 if month_num == 12:
-                    end_date = datetime(year + 1, 1, 1) - timedelta(days=1)
+                    end_date = datetime(year + 1, 1, 1) - timedelta(microseconds=1)   # end of the last day
                 else:
-                    end_date = datetime(year, month_num + 1, 1) - timedelta(days=1)
+                    end_date = datetime(year, month_num + 1, 1) - timedelta(microseconds=1)   # end of the last day
                 
-                revenue = db.session.query(func.sum(Transaction.amount * 0.1))\
-                    .filter(Transaction.status == 'completed',
-                           Transaction.completion_date.between(start_date, end_date)).scalar() or 0
+                revenue = _revenue(start_date, end_date)
                 
-                transactions = Transaction.query.filter(
-                    Transaction.status == 'completed',
-                    Transaction.completion_date.between(start_date, end_date)
-                ).count()
+                transactions = _plans(start_date, end_date)        # plans opened, as on screen
                 
                 ws.cell(row=row, column=1, value=start_date.strftime("%b %Y"))
                 ws.cell(row=row, column=2, value=float(revenue))
@@ -489,9 +438,9 @@ class AdminReportDownloadResource(Resource):
             for month_num in range(1, 13):
                 start_date = datetime(year, month_num, 1)
                 if month_num == 12:
-                    end_date = datetime(year + 1, 1, 1) - timedelta(days=1)
+                    end_date = datetime(year + 1, 1, 1) - timedelta(microseconds=1)   # end of the last day
                 else:
-                    end_date = datetime(year, month_num + 1, 1) - timedelta(days=1)
+                    end_date = datetime(year, month_num + 1, 1) - timedelta(microseconds=1)   # end of the last day
                 
                 total = Transaction.query.filter(
                     Transaction.created_at.between(start_date, end_date)
@@ -560,20 +509,16 @@ class AdminDashboardKPIResource(Resource):
         
         # Year-to-date revenue
         ytd_start = datetime(current_year, 1, 1)
-        ytd_revenue = db.session.query(func.sum(Transaction.amount * 0.1))\
-            .filter(Transaction.status == 'completed',
-                   Transaction.completion_date >= ytd_start).scalar() or 0
+        ytd_revenue = _revenue(ytd_start)
         
         # Monthly revenue (current month)
         month_start = datetime(current_year, current_month, 1)
         if current_month == 12:
-            month_end = datetime(current_year + 1, 1, 1) - timedelta(days=1)
+            month_end = datetime(current_year + 1, 1, 1) - timedelta(microseconds=1)   # end of the last day
         else:
-            month_end = datetime(current_year, current_month + 1, 1) - timedelta(days=1)
+            month_end = datetime(current_year, current_month + 1, 1) - timedelta(microseconds=1)   # end of the last day
         
-        monthly_revenue = db.session.query(func.sum(Transaction.amount * 0.1))\
-            .filter(Transaction.status == 'completed',
-                   Transaction.completion_date.between(month_start, month_end)).scalar() or 0
+        monthly_revenue = _revenue(month_start, month_end)
         
         # Customer growth (year-over-year)
         last_year_start = datetime(current_year - 1, 1, 1)

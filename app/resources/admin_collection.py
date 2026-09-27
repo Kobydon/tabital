@@ -7,99 +7,50 @@ from app.extensions import db
 from datetime import datetime, timedelta
 from sqlalchemy import func, or_
 
+# §8.4 buckets: (key, label, min days past due, max days past due or None)
+BUCKETS = [
+    ('dpd_1_30', '1-30', 1, 30),
+    ('dpd_31_60', '31-60', 31, 60),
+    ('dpd_61_90', '61-90', 61, 90),
+    ('dpd_90_plus', '90+', 91, None),
+]
+
+
+def _overdue_query(min_days, max_days, today):
+    """Unpaid overdue instalments whose days past due fall in [min_days, max_days]."""
+    start_of_today = datetime(today.year, today.month, today.day)
+    q = InstalmentPayment.query.filter(
+        InstalmentPayment.status == 'overdue',
+        InstalmentPayment.due_date <= start_of_today - timedelta(days=min_days))
+    if max_days is not None:
+        q = q.filter(InstalmentPayment.due_date > start_of_today - timedelta(days=max_days + 1))
+    return q
+
+
 class AdminCollectionStatsResource(Resource):
     @auth_required
     def get(self):
-        """Get collection statistics"""
+        """Collection statistics by §8.4 delinquency bucket (real figures only)."""
         current_admin = current_user()
         
         if current_admin.role != 'admin':
             return {"error": "Unauthorized"}, 403
         
-        # Date calculations
         today = datetime.now().date()
-        last_30_days = today - timedelta(days=30)
-        previous_30_days = last_30_days - timedelta(days=30)
+        overdue = InstalmentPayment.query.filter(InstalmentPayment.status == 'overdue').all()
+        total_overdue = sum(p.get_total_due() for p in overdue)      # still owed, after part payments
+        accounts_overdue = len({p.plan.customer_id for p in overdue if p.plan})
         
-        # Total Overdue Amount
-        total_overdue = db.session.query(func.sum(InstalmentPayment.amount))\
-            .filter(InstalmentPayment.status == 'overdue',
-                   InstalmentPayment.due_date < datetime.now()).scalar() or 0
-        
-        # Accounts Overdue (unique customers with overdue payments)
-        accounts_overdue = db.session.query(func.count(func.distinct(InstalmentPlan.customer_id)))\
-            .join(InstalmentPayment, InstalmentPlan.id == InstalmentPayment.plan_id)\
-            .filter(InstalmentPayment.status == 'overdue',
-                   InstalmentPayment.due_date < datetime.now()).scalar() or 0
-        
-        # Calculate growth
-        total_overdue_previous = db.session.query(func.sum(InstalmentPayment.amount))\
-            .filter(InstalmentPayment.status == 'overdue',
-                   InstalmentPayment.due_date.between(previous_30_days, last_30_days)).scalar() or 0
-        overdue_growth = ((total_overdue - total_overdue_previous) / total_overdue_previous * 100) if total_overdue_previous > 0 else 0
-        
-        accounts_previous = db.session.query(func.count(func.distinct(InstalmentPlan.customer_id)))\
-            .join(InstalmentPayment, InstalmentPlan.id == InstalmentPayment.plan_id)\
-            .filter(InstalmentPayment.status == 'overdue',
-                   InstalmentPayment.due_date.between(previous_30_days, last_30_days)).scalar() or 0
-        accounts_growth = ((accounts_overdue - accounts_previous) / accounts_previous * 100) if accounts_previous > 0 else 0
-        
-        # Overdue by range
-        overdue_1_15 = db.session.query(func.sum(InstalmentPayment.amount))\
-            .filter(InstalmentPayment.status == 'overdue',
-                   InstalmentPayment.due_date.between(today - timedelta(days=15), today)).scalar() or 0
-        
-        overdue_16_30 = db.session.query(func.sum(InstalmentPayment.amount))\
-            .filter(InstalmentPayment.status == 'overdue',
-                   InstalmentPayment.due_date.between(today - timedelta(days=30), today - timedelta(days=16))).scalar() or 0
-        
-        overdue_31_60 = db.session.query(func.sum(InstalmentPayment.amount))\
-            .filter(InstalmentPayment.status == 'overdue',
-                   InstalmentPayment.due_date.between(today - timedelta(days=60), today - timedelta(days=31))).scalar() or 0
-        
-        overdue_60_plus = db.session.query(func.sum(InstalmentPayment.amount))\
-            .filter(InstalmentPayment.status == 'overdue',
-                   InstalmentPayment.due_date < today - timedelta(days=60)).scalar() or 0
-        
-        # Counts by range
-        count_1_15 = InstalmentPayment.query.filter(
-            InstalmentPayment.status == 'overdue',
-            InstalmentPayment.due_date.between(today - timedelta(days=15), today)
-        ).count()
-        
-        count_16_30 = InstalmentPayment.query.filter(
-            InstalmentPayment.status == 'overdue',
-            InstalmentPayment.due_date.between(today - timedelta(days=30), today - timedelta(days=16))
-        ).count()
-        
-        count_31_60 = InstalmentPayment.query.filter(
-            InstalmentPayment.status == 'overdue',
-            InstalmentPayment.due_date.between(today - timedelta(days=60), today - timedelta(days=31))
-        ).count()
-        
-        count_60_plus = InstalmentPayment.query.filter(
-            InstalmentPayment.status == 'overdue',
-            InstalmentPayment.due_date < today - timedelta(days=60)
-        ).count()
-        
-        return {
+        body = {
             "total_overdue": float(total_overdue),
-            "total_overdue_growth": round(overdue_growth, 1),
             "accounts_overdue": accounts_overdue,
-            "accounts_overdue_growth": round(accounts_growth, 1),
-            "overdue_1_15": float(overdue_1_15),
-            "overdue_1_15_growth": 6.1,
-            "overdue_16_30": float(overdue_16_30),
-            "overdue_16_30_growth": 4.3,
-            "overdue_31_60": float(overdue_31_60),
-            "overdue_31_60_growth": 18.7,
-            "overdue_60_plus": float(overdue_60_plus),
-            "overdue_60_plus_growth": 22.4,
-            "count_1_15": count_1_15,
-            "count_16_30": count_16_30,
-            "count_31_60": count_31_60,
-            "count_60_plus": count_60_plus
-        }, 200
+        }
+        for key, label, lo, hi in BUCKETS:
+            rows = _overdue_query(lo, hi, today).all()
+            body[f"overdue_{key}"] = float(sum(p.get_total_due() for p in rows))
+            body[f"count_{key}"] = len(rows)
+        body["buckets"] = [{"key": k, "label": f"{label} days"} for k, label, _, _ in BUCKETS]
+        return body, 200
 
 
 class AdminGetOverduePaymentsResource(Resource):
@@ -115,7 +66,7 @@ class AdminGetOverduePaymentsResource(Resource):
         page = request.args.get('page', 1, type=int)
         per_page = request.args.get('per_page', 20, type=int)
         search = request.args.get('search', '', type=str)
-        overdue_range = request.args.get('overdue_range', '', type=str)  # 1-15, 16-30, 31-60, 60+
+        overdue_range = request.args.get('overdue_range', '', type=str)  # 1-30, 31-60, 61-90, 90+ (§8.4)
         status = request.args.get('status', '', type=str)
         
         # Build query for overdue payments
@@ -127,14 +78,12 @@ class AdminGetOverduePaymentsResource(Resource):
         
         # Apply overdue range filter
         if overdue_range:
-            if overdue_range == '1-15':
-                query = query.filter(InstalmentPayment.due_date.between(today - timedelta(days=15), today))
-            elif overdue_range == '16-30':
-                query = query.filter(InstalmentPayment.due_date.between(today - timedelta(days=30), today - timedelta(days=16)))
-            elif overdue_range == '31-60':
-                query = query.filter(InstalmentPayment.due_date.between(today - timedelta(days=60), today - timedelta(days=31)))
-            elif overdue_range == '60+':
-                query = query.filter(InstalmentPayment.due_date < today - timedelta(days=60))
+            for _key, label, lo, hi in BUCKETS:
+                if overdue_range == label:
+                    start_of_today = datetime(today.year, today.month, today.day)
+                    query = query.filter(InstalmentPayment.due_date <= start_of_today - timedelta(days=lo))
+                    if hi is not None:
+                        query = query.filter(InstalmentPayment.due_date > start_of_today - timedelta(days=hi + 1))
         
         # Apply search filter
         if search:
@@ -162,17 +111,9 @@ class AdminGetOverduePaymentsResource(Resource):
             customer = User.query.get(plan.customer_id) if plan else None
             merchant = User.query.get(plan.merchant_id) if plan else None
             
-            days_overdue = (today - payment.due_date).days
-            
-            # Determine overdue range display
-            if days_overdue <= 15:
-                overdue_range_display = "1-15 Days"
-            elif days_overdue <= 30:
-                overdue_range_display = "16-30 Days"
-            elif days_overdue <= 60:
-                overdue_range_display = "31-60 Days"
-            else:
-                overdue_range_display = "60+ Days"
+            days_overdue = (today.date() - payment.due_date.date()).days
+            overdue_range_display = next((f"{label} Days" for _k, label, lo, hi in BUCKETS
+                                          if days_overdue >= lo and (hi is None or days_overdue <= hi)), "Current")
             
             overdue_payments.append({
                 "id": payment.id,
@@ -186,14 +127,15 @@ class AdminGetOverduePaymentsResource(Resource):
                 "installment_number": payment.installment_number,
                 "amount": float(payment.amount),
                 "late_fee": float(payment.late_fee),
-                "total_due": float(payment.amount + payment.late_fee),
+                "total_due": payment.get_total_due(),          # still owed, after part payments
+                "part_paid": float(payment.part_paid()),
                 "due_date": payment.due_date.isoformat() if payment.due_date else None,
                 "days_overdue": days_overdue,
                 "overdue_range": overdue_range_display,
                 "status": payment.status,
                 "payment_method": payment.payment_method,
                 "payment_reference": payment.payment_reference,
-                "collection_stage": get_collection_stage(days_overdue)
+                "collection_stage": get_collection_stage(days_overdue, plan)
             })
         
         return {
@@ -205,16 +147,22 @@ class AdminGetOverduePaymentsResource(Resource):
         }, 200
 
 
-def get_collection_stage(days_overdue):
-    """Determine collection stage based on days overdue"""
-    if days_overdue <= 15:
-        return "Payment Reminder"
-    elif days_overdue <= 30:
-        return "Late Fee Applied"
-    elif days_overdue <= 60:
-        return "Agent Assigned"
-    else:
-        return "Escalated to Legal"
+STAGE_LABELS = {
+    'reminders': 'Automated reminders',
+    'call_centre': 'Collections call centre',
+    'employer_contact': 'Employer-assisted contact',
+    'bureau_reporting': 'Credit bureau reporting',
+    'legal_recovery': 'Legal recovery (high-ticket)',
+}
+
+
+def get_collection_stage(days_overdue, plan=None):
+    """§8.5 recovery ladder for this many days past due."""
+    from app.models.system_settings import SystemSetting
+    from app.services.servicing import collection_stage
+    stage = collection_stage(days_overdue, plan.total_amount if plan else None,
+                             SystemSetting.get_value("high_ticket_threshold", 10000))
+    return STAGE_LABELS.get(stage, 'Current')
 
 
 class AdminGetOverduePaymentDetailResource(Resource):
@@ -235,7 +183,7 @@ class AdminGetOverduePaymentDetailResource(Resource):
         merchant = User.query.get(plan.merchant_id) if plan else None
         
         today = datetime.now()
-        days_overdue = (today - payment.due_date).days if payment.due_date else 0
+        days_overdue = (today.date() - payment.due_date.date()).days if payment.due_date else 0
         
         # Get all payments for this plan
         all_payments = InstalmentPayment.query.filter_by(plan_id=plan.id).order_by(InstalmentPayment.installment_number).all() if plan else []
@@ -249,40 +197,28 @@ class AdminGetOverduePaymentDetailResource(Resource):
                 "amount": float(p.amount),
                 "status": p.status,
                 "paid_date": p.paid_date.isoformat() if p.paid_date else None,
-                "late_fee": float(p.late_fee)
+                "late_fee": float(p.late_fee),
+                "part_paid": float(p.part_paid())
             })
         
-        # Collection timeline
+        # Timeline of what actually happened: late fees charged and messages actually sent
+        from app.models.message_outbox import MessageOutbox
         collection_timeline = []
-        if days_overdue > 0:
-            if days_overdue <= 15:
-                collection_timeline.append({
-                    "stage": "Payment Reminder",
-                    "completed": True,
-                    "completed_date": (payment.due_date + timedelta(days=1)).isoformat(),
-                    "actions": ["Sent SMS reminder", "Sent WhatsApp reminder"]
-                })
-            if days_overdue > 15:
-                collection_timeline.append({
-                    "stage": "Late Fee Applied",
-                    "completed": True,
-                    "completed_date": (payment.due_date + timedelta(days=16)).isoformat(),
-                    "actions": ["10% late fee applied"]
-                })
-            if days_overdue > 30:
-                collection_timeline.append({
-                    "stage": "Agent Assigned",
-                    "completed": True,
-                    "completed_date": (payment.due_date + timedelta(days=31)).isoformat(),
-                    "actions": ["Collection agent assigned", "Phone call attempted"]
-                })
-            if days_overdue > 60:
-                collection_timeline.append({
-                    "stage": "Escalated to Legal",
-                    "completed": days_overdue > 60,
-                    "completed_date": (payment.due_date + timedelta(days=61)).isoformat() if days_overdue > 60 else None,
-                    "actions": ["Legal notice sent", "Case filed" if days_overdue > 90 else "Pre-legal notice"]
-                })
+        if payment.late_fee_applied_date:
+            collection_timeline.append({"stage": "Late fee charged", "completed": True,
+                                        "completed_date": payment.late_fee_applied_date.isoformat(),
+                                        "actions": ["First late fee"]})
+        if payment.second_late_fee_applied_date:
+            collection_timeline.append({"stage": "Second late fee charged", "completed": True,
+                                        "completed_date": payment.second_late_fee_applied_date.isoformat(),
+                                        "actions": ["Additional late fee (31+ days past due)"]})
+        for m in MessageOutbox.query.filter_by(payment_id=payment.id).order_by(MessageOutbox.created_at).all():
+            collection_timeline.append({"stage": f"Reminder: {m.template.replace('_', ' ')}",
+                                        "completed": m.status == MessageOutbox.SENT,
+                                        "completed_date": (m.sent_at or m.created_at).isoformat(),
+                                        "actions": [f"{m.channel.upper()} {m.status}"]})
+        collection_timeline.sort(key=lambda x: x["completed_date"] or "")
+        current_stage = get_collection_stage(days_overdue, plan)
         
         return {
             "payment": {
@@ -291,7 +227,9 @@ class AdminGetOverduePaymentDetailResource(Resource):
                 "installment_number": payment.installment_number,
                 "amount": float(payment.amount),
                 "late_fee": float(payment.late_fee),
-                "total_due": float(payment.amount + payment.late_fee),
+                "total_due": payment.get_total_due(),          # still owed, after part payments
+                "part_paid": float(payment.part_paid()),
+                "part_payments": [p.to_dict() for p in payment.part_payments()],
                 "due_date": payment.due_date.isoformat() if payment.due_date else None,
                 "days_overdue": days_overdue,
                 "status": payment.status,
@@ -303,7 +241,7 @@ class AdminGetOverduePaymentDetailResource(Resource):
                 "plan_id": plan.plan_id,
                 "plan_name": plan.plan_name,
                 "total_amount": float(plan.total_amount),
-                "remaining_amount": float(plan.remaining_amount),
+                "remaining_amount": plan.outstanding_balance,
                 "number_of_installments": plan.number_of_installments,
                 "paid_installments": plan.paid_installments
             },
@@ -319,7 +257,8 @@ class AdminGetOverduePaymentDetailResource(Resource):
                 "phone": merchant.phone if merchant else "N/A"
             },
             "payment_schedule": payment_schedule,
-            "collection_timeline": collection_timeline
+            "collection_timeline": collection_timeline,
+            "collection_stage": current_stage
         }, 200
 
 
@@ -332,24 +271,47 @@ class AdminSendPaymentReminderResource(Resource):
         if current_admin.role != 'admin':
             return {"error": "Unauthorized"}, 403
         
-        data = request.get_json()
-        reminder_type = data.get('reminder_type', 'sms')  # sms, whatsapp, email
-        
+        from app.extensions import db as _db
+        from app.models.message_outbox import MessageOutbox
+        from app.services import reminders
+        from app.services.sms import to_e164
+
+        data = request.get_json() or {}
+        channel = data.get('reminder_type', 'sms')
+        # WhatsApp isn't connected yet (it would silently go out as SMS)
+        if channel not in ('sms', 'in_app'):
+            return {"error": "reminder_type must be sms or in_app"}, 400
+
         payment = InstalmentPayment.query.get(payment_id)
         if not payment:
             return {"error": "Payment not found"}, 404
-        
+        if payment.status == 'paid':
+            return {"error": "This instalment is already paid"}, 400
+
         plan = InstalmentPlan.query.get(payment.plan_id)
         customer = User.query.get(plan.customer_id) if plan else None
-        
-        # Here you would integrate with SMS/WhatsApp/Email service
-        # For now, just log the reminder
-        
+        if not customer:
+            return {"error": "Customer not found"}, 404
+
+        template = 'late_fee_charged' if payment.late_fee_applied_date else 'due_today'
+        title, body = reminders.render(template, payment, plan)
+        to = to_e164(customer.phone) if channel != 'in_app' else None
+        if channel != 'in_app' and not to:
+            return {"error": "The customer has no valid phone number"}, 400
+        msg = MessageOutbox(user_id=customer.id, channel=channel, to_address=to, template='manual_reminder',
+                            title=title, body=body, plan_id=plan.id, payment_id=payment.id,
+                            dedupe_key=f"manual:{payment.id}:{channel}:{datetime.utcnow().timestamp()}")
+        _db.session.add(msg)
+        _db.session.commit()
+        reminders.dispatch_pending()
+
         return {
-            "message": f"Payment reminder sent via {reminder_type} to {customer.phone if customer else 'customer'}",
+            "message": f"Reminder {msg.status} via {channel}" + (f" ({msg.provider})" if msg.provider else ""),
             "payment_id": payment.payment_id,
-            "reminder_type": reminder_type,
-            "sent_at": datetime.now().isoformat()
+            "reminder_type": channel,
+            "status": msg.status,
+            "provider": msg.provider,
+            "sent_at": msg.sent_at.isoformat() if msg.sent_at else None
         }, 200
 
 
@@ -362,77 +324,49 @@ class AdminMarkPaymentReceivedResource(Resource):
         if current_admin.role != 'admin':
             return {"error": "Unauthorized"}, 403
         
-        data = request.get_json()
-        amount_received = data.get('amount_received', 0)
-        payment_method = data.get('payment_method', 'manual')
-        payment_reference = data.get('payment_reference', '')
-        
+        from app.services import payments
+
+        data = request.get_json() or {}
+        payment_method = (data.get('payment_method') or 'manual').strip()[:50]
+        if payment_method not in ('mobile_money', 'bank_transfer', 'cash', 'card', 'manual'):
+            return {"error": "Unknown payment method"}, 400
+
         payment = InstalmentPayment.query.get(payment_id)
         if not payment:
             return {"error": "Payment not found"}, 404
-        
-        if payment.status == 'paid':
-            return {"error": "Payment already marked as paid"}, 400
-        
-        payment.status = 'paid'
-        payment.paid_date = datetime.now()
-        payment.paid_amount = amount_received if amount_received > 0 else payment.amount
-        payment.payment_method = payment_method
-        payment.payment_reference = payment_reference
-        
-        # Update the instalment plan
-        plan = InstalmentPlan.query.get(payment.plan_id)
-        if plan:
-            plan.paid_installments += 1
-            plan.remaining_amount -= payment.amount
-            
-            if plan.paid_installments >= plan.number_of_installments:
-                plan.status = 'completed'
-                plan.completed_at = datetime.now()
-        
+
+        # Less than what's owed is a part payment (services/payments.record_payment)
+        try:
+            outcome = payments.record_payment(payment, data.get('amount_received'), payment_method,
+                                              data.get('payment_reference'), user=current_admin)
+        except payments.PaymentError as e:
+            db.session.rollback()
+            return {"error": str(e)}, 400
         db.session.commit()
-        
+
+        still_owed = payment.get_total_due()
         return {
-            "message": "Payment marked as received",
+            "message": "Payment recorded" if outcome == 'paid'
+                       else f"Part payment recorded. {still_owed:.2f} is still owed on this instalment.",
             "payment_id": payment.payment_id,
-            "status": "paid",
-            "amount_received": amount_received if amount_received > 0 else payment.amount
+            "status": payment.status,
+            "outcome": outcome,
+            "still_owed": still_owed,
+            "part_payments": [p.to_dict() for p in payment.part_payments()],
         }, 200
 
 
 class AdminSetPaymentPlanResource(Resource):
+    """Turned off. It moved an overdue instalment's due date with no fee, record or ledger entry,
+    which hides delinquency (CLAUDE.md §8.4, §12). Customers can defer one instalment for the 10%
+    fee (deferments.py). An admin hardship arrangement needs a founder policy first."""
+
     @auth_required
     def post(self, payment_id):
-        """Set up a payment plan for overdue payment"""
-        current_admin = current_user()
-        
-        if current_admin.role != 'admin':
+        if current_user().role != 'admin':
             return {"error": "Unauthorized"}, 403
-        
-        data = request.get_json()
-        plan_type = data.get('plan_type', 'installments')  # installments, extension, partial
-        new_due_date = data.get('new_due_date')
-        notes = data.get('notes', '')
-        
-        payment = InstalmentPayment.query.get(payment_id)
-        if not payment:
-            return {"error": "Payment not found"}, 404
-        
-        # Update payment with new arrangement
-        if new_due_date:
-            payment.due_date = datetime.fromisoformat(new_due_date)
-        
-        # Store arrangement details (you might want to create a PaymentArrangement model)
-        
-        db.session.commit()
-        
-        return {
-            "message": f"Payment plan arranged: {plan_type}",
-            "payment_id": payment.payment_id,
-            "new_due_date": new_due_date,
-            "plan_type": plan_type
-        }, 200
-
+        return {"error": "Changing a due date from Collections is turned off. The customer can defer one "
+                         "instalment (10% fee) from their app; other arrangements need a founder-approved policy."}, 410
 
 class AdminExportOverduePaymentsResource(Resource):
     @auth_required
@@ -481,7 +415,7 @@ class AdminExportOverduePaymentsResource(Resource):
                 payment.installment_number,
                 payment.amount,
                 payment.late_fee,
-                payment.amount + payment.late_fee,
+                payment.get_total_due(),
                 payment.due_date.strftime("%Y-%m-%d") if payment.due_date else "",
                 days_overdue,
                 payment.status

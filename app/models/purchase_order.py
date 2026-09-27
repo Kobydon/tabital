@@ -32,9 +32,28 @@ class PurchaseOrder(db.Model):
     # Payment Schedule (JSON)
     payment_schedule = db.Column(db.Text)  # ✅ This stores the schedule
     
-    # Status
+    # Status: awaiting_payment -> pending (down payment received, awaiting approval)
+    #         -> approved / rejected -> completed
     status = db.Column(db.String(50), default='pending')
     admin_notes = db.Column(db.Text)
+
+    # Down payment collected at checkout (Payment 1 = down payment + delivery fee)
+    down_payment_status = db.Column(db.String(30), default='unpaid')   # unpaid, paid
+    down_payment_reference = db.Column(db.String(100))
+    down_payment_method = db.Column(db.String(50))
+    down_payment_paid_at = db.Column(db.DateTime)
+    # Set when a paid order is rejected: refunded, refund_failed
+    refund_status = db.Column(db.String(30))
+    refund_reference = db.Column(db.String(100))
+    # Set on approval, so delivery updates the right transaction (was matched by product name)
+    transaction_id = db.Column(db.Integer, db.ForeignKey('transactions.id'), nullable=True)
+    # In-store / WhatsApp sale made through a merchant payment link
+    payment_link_id = db.Column(db.Integer, db.ForeignKey('payment_links.id'), nullable=True)
+    # The underwriting decision this order was accepted under
+    risk_assessment_id = db.Column(db.Integer, db.ForeignKey('risk_assessments.id'), nullable=True)
+    # Consent (§10): which Terms the customer agreed to, and when
+    terms_version = db.Column(db.String(40))
+    terms_accepted_at = db.Column(db.DateTime)
     
     # Delivery
     delivery_address = db.Column(db.String(500))

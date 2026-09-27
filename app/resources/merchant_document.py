@@ -341,18 +341,22 @@ class MerchantUpdateBankDetailsResource(Resource):
         if current_merchant.role != "merchant":
             return {"error": "Unauthorized"}, 403
         
-        data = request.get_json()
-        
-        # Update bank fields
-        allowed_fields = ['bank_name', 'account_name', 'account_number', 'branch_name', 'swift_code', 'momo_name', 'momo_number']
-        
-        for field in allowed_fields:
-            if field in data:
-                setattr(current_merchant, field, data[field])
-        
+        from .merchant_payouts import PayoutError, apply_payout_details
+
+        data = request.get_json() or {}
+
+        # Payout fields go through the validated path (a change pauses payouts for 48 hours)
+        try:
+            changed = apply_payout_details(current_merchant, data)
+        except PayoutError as e:
+            return {"error": str(e)}, 400
+        if 'swift_code' in data:
+            current_merchant.swift_code = data['swift_code']
+
         db.session.commit()
-        
-        return {"message": "Bank details updated successfully"}, 200
+
+        return {"message": "Bank details updated. For your security, payouts are paused for 48 hours."
+                           if changed else "Bank details updated successfully"}, 200
 
 
 class AdminGetPendingMerchantKYCResource(Resource):

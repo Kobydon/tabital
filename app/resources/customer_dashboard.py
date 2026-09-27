@@ -13,6 +13,12 @@ def safe_str(v): return v if v is not None else ""
 def safe_float(v): return v if v is not None else 0.0
 def safe_int(v): return v if v is not None else 0
 
+
+def _credit_summary(customer):
+    from ..services import risk
+    decision, _ = risk.decide(customer)
+    return risk.decision_view(decision)
+
 class CustomerDashboardStatsResource(Resource):
     @auth_required
     def get(self):
@@ -29,7 +35,7 @@ class CustomerDashboardStatsResource(Resource):
         ).all()
         
         # Calculate total outstanding
-        total_outstanding = sum(p.remaining_amount for p in active_plans)
+        total_outstanding = sum(p.outstanding_balance for p in active_plans)
         total_outstanding_plans_count = len(active_plans)
         
         # Get next payment
@@ -41,7 +47,7 @@ class CustomerDashboardStatsResource(Resource):
             InstalmentPayment.due_date >= datetime.now()
         ).order_by(InstalmentPayment.due_date.asc()).first()
         
-        next_payment_amount = next_payment.amount if next_payment else 0
+        next_payment_amount = next_payment.get_total_due() if next_payment else 0     # what's still owed
         next_payment_date = next_payment.due_date.isoformat() if next_payment else ""
         next_payment_plan_name = next_payment.plan.plan_name if next_payment else ""
         
@@ -55,7 +61,7 @@ class CustomerDashboardStatsResource(Resource):
             InstalmentPayment.paid_date >= year_start
         ).all()
         
-        paid_to_date = sum(p.amount for p in paid_payments)
+        paid_to_date = _received(current_customer.id, year_start)      # ledger: includes part payments
         
         # Account status
         account_status = 'good_standing'
@@ -76,6 +82,8 @@ class CustomerDashboardStatsResource(Resource):
         
         return {
             "total_outstanding": safe_float(total_outstanding),
+            # Spending limit from underwriting (computed now, not stored)
+            "credit": _credit_summary(current_customer),
             "total_outstanding_plans_count": safe_int(total_outstanding_plans_count),
             "next_payment_amount": safe_float(next_payment_amount),
             "next_payment_date": next_payment_date,
@@ -134,7 +142,7 @@ class CustomerPaymentOverviewResource(Resource):
                 InstalmentPayment.paid_date < next_month
             ).all()
             
-            paid_amount = sum(p.amount for p in paid_payments)
+            paid_amount = _received(current_customer.id, month_start, next_month)
             
             # Get pending payments due this month
             pending_payments = InstalmentPayment.query.join(
@@ -146,7 +154,7 @@ class CustomerPaymentOverviewResource(Resource):
                 InstalmentPayment.due_date < next_month
             ).all()
             
-            pending_amount = sum(p.amount for p in pending_payments)
+            pending_amount = sum(p.get_total_due() for p in pending_payments)
             
             # Only add months that have data or are recent months
             # Use consistent month format without year for chart
@@ -196,13 +204,13 @@ class CustomerUpcomingPaymentsResource(Resource):
                 "merchant_name": safe_str(plan.merchant.business_name or plan.merchant.full_name),
                 "merchant_phone": safe_str(plan.merchant.phone),
                 "total_amount": safe_float(plan.total_amount),
-                "amount_paid": safe_float(plan.total_amount - plan.remaining_amount),
-                "amount_outstanding": safe_float(plan.remaining_amount),
+                "amount_paid": safe_float(plan.paid_to_date),
+                "amount_outstanding": safe_float(plan.outstanding_balance),
                 "instalment_term": safe_int(plan.number_of_installments),
                 "instalment_frequency": safe_str(plan.frequency),
                 "instalment_amount": safe_float(plan.installment_amount),
                 "next_payment_date": payment.due_date.isoformat() if payment.due_date else "",
-                "next_payment_amount": safe_float(payment.amount),
+                "next_payment_amount": safe_float(payment.get_total_due()),
                 "due_date": payment.due_date.isoformat() if payment.due_date else "",
                 "status": safe_str(plan.status),
                 "created_at": plan.created_at.isoformat() if plan.created_at else ""
@@ -239,7 +247,7 @@ class CustomerRecentTransactionsResource(Resource):
                 "merchant_name": safe_str(plan.merchant.business_name or plan.merchant.full_name),
                 "product_name": safe_str(plan.plan_name),
                 "product_description": safe_str(plan.description),
-                "amount": safe_float(payment.amount),
+                "amount": safe_float(payment.paid_amount or payment.amount),
                 "payment_method": safe_str(payment.payment_method),
                 "payment_plan": "Instalment",
                 "status": "completed",
@@ -280,9 +288,10 @@ class CustomerInstalmentsResource(Resource):
                 InstalmentPayment.plan_id == plan.id,
                 InstalmentPayment.status.in_(['pending', 'overdue'])
             ).order_by(InstalmentPayment.due_date.asc()).first()
-            
+
             result.append({
                 "id": plan.id,
+                "payment_schedule": _schedule(plan),
                 "plan_id": safe_str(plan.plan_id),
                 "transaction_id": safe_str(plan.transaction_id),
                 "product_name": safe_str(plan.plan_name),
@@ -290,13 +299,13 @@ class CustomerInstalmentsResource(Resource):
                 "merchant_name": safe_str(plan.merchant.business_name or plan.merchant.full_name),
                 "merchant_phone": safe_str(plan.merchant.phone),
                 "total_amount": safe_float(plan.total_amount),
-                "amount_paid": safe_float(plan.total_amount - plan.remaining_amount),
-                "amount_outstanding": safe_float(plan.remaining_amount),
+                "amount_paid": safe_float(plan.paid_to_date),
+                "amount_outstanding": safe_float(plan.outstanding_balance),
                 "instalment_term": safe_int(plan.number_of_installments),
                 "instalment_frequency": safe_str(plan.frequency),
                 "instalment_amount": safe_float(plan.installment_amount),
                 "next_payment_date": next_payment.due_date.isoformat() if next_payment else "",
-                "next_payment_amount": safe_float(next_payment.amount) if next_payment else 0,
+                "next_payment_amount": safe_float(next_payment.get_total_due()) if next_payment else 0,
                 "due_date": plan.end_date.isoformat() if plan.end_date else "",
                 "status": safe_str(plan.status),
                 "created_at": plan.created_at.isoformat() if plan.created_at else "",
@@ -309,6 +318,50 @@ class CustomerInstalmentsResource(Resource):
             "page": page,
             "limit": limit
         }
+
+
+
+def _received(customer_id, start=None, end=None):
+    """Money the customer actually paid (ledger PAYMENT_RECEIVED, part payments included), in GHS."""
+    from ..models.ledger import LedgerEntry
+    from ..services import ledger
+    q = db.session.query(db.func.coalesce(db.func.sum(LedgerEntry.amount_pesewas), 0))\
+        .join(InstalmentPlan, InstalmentPlan.id == LedgerEntry.plan_id)\
+        .filter(InstalmentPlan.customer_id == customer_id, LedgerEntry.entry_type == LedgerEntry.PAYMENT_RECEIVED)
+    if start is not None:
+        q = q.filter(LedgerEntry.created_at >= start)
+    if end is not None:
+        q = q.filter(LedgerEntry.created_at < end)
+    return float(-ledger.to_cedis(q.scalar()))
+
+
+def _schedule(plan, payments=None):
+    """A plan's payments for the customer, including any unpaid late fee and the total now due."""
+    if payments is None:
+        payments = InstalmentPayment.query.filter_by(plan_id=plan.id)\
+            .order_by(InstalmentPayment.installment_number).all()
+    rows = []
+    for p in payments:
+        unpaid_fee = safe_float(p.late_fee) if p.late_fee and not p.late_fee_paid and p.status != 'paid' else 0.0
+        part_paid = float(p.part_paid()) if p.status != 'paid' else 0.0
+        rows.append({
+            "id": p.id,
+            "installment_number": p.installment_number,
+            "instalment_number": p.installment_number,      # older spelling, kept for existing screens
+            "due_date": p.due_date.isoformat() if p.due_date else "",
+            "original_due_date": p.original_due_date.isoformat() if p.original_due_date else None,
+            "amount": safe_float(p.amount),
+            "late_fee": unpaid_fee,
+            # What's still owed now (instalment + unpaid late fee - part payments already received)
+            "amount_due": safe_float(p.get_total_due()) if p.status != 'paid' else 0.0,
+            "part_paid": part_paid,
+            "part_payments": [{"amount": pp.amount_pesewas / 100, "at": pp.created_at.isoformat()}
+                              for pp in p.part_payments()] if part_paid else [],
+            "status": safe_str(p.status),
+            "paid_date": p.paid_date.isoformat() if p.paid_date else "",
+            "payment_reference": safe_str(p.payment_reference),
+        })
+    return rows
 
 
 class CustomerPlanDetailsResource(Resource):
@@ -333,17 +386,7 @@ class CustomerPlanDetailsResource(Resource):
             plan_id=plan.id
         ).order_by(InstalmentPayment.installment_number).all()
         
-        payment_schedule = []
-        for payment in payments:
-            payment_schedule.append({
-                "id": payment.id,
-                "instalment_number": payment.installment_number,
-                "due_date": payment.due_date.isoformat() if payment.due_date else "",
-                "amount": safe_float(payment.amount),
-                "status": safe_str(payment.status),
-                "paid_date": payment.paid_date.isoformat() if payment.paid_date else "",
-                "payment_reference": safe_str(payment.payment_reference)
-            })
+        payment_schedule = _schedule(plan, payments)
         
         return {
             "id": plan.id,
@@ -354,8 +397,8 @@ class CustomerPlanDetailsResource(Resource):
             "merchant_name": safe_str(plan.merchant.business_name or plan.merchant.full_name),
             "merchant_phone": safe_str(plan.merchant.phone),
             "total_amount": safe_float(plan.total_amount),
-            "amount_paid": safe_float(plan.total_amount - plan.remaining_amount),
-            "amount_outstanding": safe_float(plan.remaining_amount),
+            "amount_paid": safe_float(plan.paid_to_date),
+            "amount_outstanding": safe_float(plan.outstanding_balance),
             "instalment_term": safe_int(plan.number_of_installments),
             "instalment_frequency": safe_str(plan.frequency),
             "instalment_amount": safe_float(plan.installment_amount),
@@ -369,66 +412,3 @@ class CustomerPlanDetailsResource(Resource):
             "payment_schedule": payment_schedule
         }
 
-
-class CustomerMakePaymentResource(Resource):
-    @auth_required
-    def post(self):
-        """Make a payment on an instalment plan"""
-        current_customer = current_user()
-        
-        if current_customer.role != "customer":
-            return {"error": "Unauthorized"}, 403
-        
-        data = request.get_json()
-        plan_id = data.get('plan_id')
-        amount = data.get('amount')
-        payment_method = data.get('payment_method')
-        
-        if not plan_id or not amount:
-            return {"error": "Plan ID and amount are required"}, 400
-        
-        plan = InstalmentPlan.query.filter_by(
-            id=plan_id,
-            customer_id=current_customer.id
-        ).first()
-        
-        if not plan:
-            return {"error": "Plan not found"}, 404
-        
-        # Get the next pending payment
-        pending_payment = InstalmentPayment.query.filter_by(
-            plan_id=plan.id,
-            status='pending'
-        ).order_by(InstalmentPayment.installment_number).first()
-        
-        if not pending_payment:
-            return {"error": "No pending payments found"}, 400
-        
-        # Process payment (integrate with payment gateway here)
-        # For now, simulate successful payment
-        
-        # Update payment record
-        pending_payment.status = 'paid'
-        pending_payment.paid_date = datetime.now()
-        pending_payment.payment_method = payment_method
-        pending_payment.payment_reference = f"PAY_{datetime.now().timestamp()}"
-        
-        # Update plan
-        plan.paid_installments += 1
-        plan.remaining_amount -= amount
-        
-        if plan.remaining_amount <= 0:
-            plan.status = 'completed'
-            plan.payment_status = 'completed'
-            plan.completed_at = datetime.now()
-        
-        db.session.commit()
-        
-        return {
-            "message": "Payment successful",
-            "payment_id": pending_payment.payment_id,
-            "payment_reference": pending_payment.payment_reference,
-            "amount_paid": amount,
-            "remaining_amount": safe_float(plan.remaining_amount),
-            "plan_status": plan.status
-        }, 200

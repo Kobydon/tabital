@@ -92,55 +92,58 @@ class AdminDashboardStatsResource(Resource):
         defaulted_plans = InstalmentPlan.query.filter_by(status='defaulted').count()
         default_rate = (defaulted_plans / total_plans * 100) if total_plans > 0 else 0
         
-        # Revenue MTD (commission earned this month)
-        current_month_start = today.replace(day=1)
-        # Assuming commission is 10% of total_amount (you can adjust based on your logic)
-        revenue_mtd = db.session.query(func.sum(InstalmentPlan.total_amount * 0.1))\
-            .filter(InstalmentPlan.status == 'completed',
-                   InstalmentPlan.completed_at >= current_month_start).scalar() or 0
-        
-        revenue_last_month = db.session.query(func.sum(InstalmentPlan.total_amount * 0.1))\
-            .filter(InstalmentPlan.status == 'completed',
-                   InstalmentPlan.completed_at.between(current_month_start - timedelta(days=30), current_month_start)).scalar() or 0
-        
+        from app.services import ledger
+        from app.models.purchase_order import PurchaseOrder
+
+        # Revenue = MDR recognised in the ledger when plans are opened (§6.1)
+        now = datetime.now()
+        current_month_start = datetime(now.year, now.month, 1)
+        last_month_start = datetime(now.year - 1, 12, 1) if now.month == 1 else datetime(now.year, now.month - 1, 1)
+        revenue_mtd = ledger.merchant_fees_between(current_month_start)
+        revenue_last_month = ledger.merchant_fees_between(last_month_start, current_month_start)
+
         revenue_growth = 0
         if revenue_last_month > 0:
             revenue_growth = ((revenue_mtd - revenue_last_month) / revenue_last_month) * 100
-        
-        # Portfolio Overview - Using remaining_amount
-        total_exposure = total_financed
-        # For risk calculation, we need to query payments that are overdue
-        # Get sum of overdue payments from InstalmentPayment table
-        overdue_payments_sum = db.session.query(func.sum(InstalmentPayment.amount))\
-            .filter(InstalmentPayment.status == 'overdue',
-                   InstalmentPayment.due_date < datetime.now()).scalar() or 0
-        
-        # Simplified risk calculation (you can adjust based on your business logic)
-        early_risk = overdue_payments_sum * 0.3  # Placeholder
-        late_risk = overdue_payments_sum * 0.5   # Placeholder
-        default_risk = overdue_payments_sum * 0.2  # Placeholder
-        
-        # Alerts
+
+        # Portfolio at risk: unpaid overdue instalments by days past due (§8.4 buckets)
+        total_exposure = ledger.portfolio_totals(InstalmentPlan.status == 'active')['outstanding']
+        start_of_today = datetime(now.year, now.month, now.day)
+        def overdue_between(min_days, max_days=None):
+            # What's still owed on those instalments (unpaid late fees, minus part payments)
+            q = InstalmentPayment.query.filter(InstalmentPayment.status == 'overdue',
+                                               InstalmentPayment.due_date <= start_of_today - timedelta(days=min_days))
+            if max_days is not None:
+                q = q.filter(InstalmentPayment.due_date > start_of_today - timedelta(days=max_days + 1))
+            return float(sum(p.get_total_due() for p in q.all()))
+        early_risk = overdue_between(1, 30)     # DPD 1-30: early delinquency
+        late_risk = overdue_between(31, 60)     # DPD 31-60: high risk
+        default_risk = overdue_between(61)      # DPD 61+: default watch / charge-off
+
+        # Alerts: only counts the system actually tracks. Features that don't exist yet report 0.
         alerts = {
-            "high_risk_transactions": 23,
-            "failed_payments": 54,
+            "high_risk_transactions": 0,
+            "failed_payments": 0,
             "overdue_installments": InstalmentPayment.query.filter(InstalmentPayment.status == 'overdue').count(),
-            "chargebacks": 17,
-            "system_notifications": 12
+            "payments_awaiting_verification": InstalmentPayment.query.filter(InstalmentPayment.status == 'pending_verification').count(),
+            "chargebacks": 0,
+            "system_notifications": 0
         }
-        
+
         # Pending Approvals
         pending_approvals = {
             "kyc_verifications": Document.query.filter_by(status='pending').count(),
             "merchant_onboarding": User.query.filter_by(role='merchant', status='pending').count(),
-            "transaction_approvals": 12,
-            "refund_requests": 5,
-            "limit_increase_requests": 9
+            "transaction_approvals": PurchaseOrder.query.filter_by(status='pending').count(),
+            "refund_requests": 0,
+            "limit_increase_requests": 0
         }
         
         # Installment Status - Using InstalmentPayment for more accurate stats
-        paid_on_time = InstalmentPayment.query.filter_by(status='paid').count()
-        paid_late = InstalmentPayment.query.filter(InstalmentPayment.status == 'paid', InstalmentPayment.late_fee > 0).count()
+        # A payment is late if a late fee was ever applied to it (even if later waived)
+        paid_late = InstalmentPayment.query.filter(
+            InstalmentPayment.status == 'paid', InstalmentPayment.late_fee_applied_date.isnot(None)).count()
+        paid_on_time = InstalmentPayment.query.filter_by(status='paid').count() - paid_late
         upcoming = InstalmentPayment.query.filter_by(status='pending').filter(InstalmentPayment.due_date >= datetime.now()).count()
         overdue = InstalmentPayment.query.filter_by(status='overdue').count()
         
