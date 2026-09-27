@@ -151,3 +151,17 @@ def test_the_owner_still_gets_a_reset_code_from_a_known_address(app_ctx):  # noq
     assert User.query.get(user.id).reset_otp is None                                  # the attacker gets nothing
     client.post("/forgot-password", json={"email": "yaw@example.com"}, headers={"X-Forwarded-For": "10.20.0.1"})
     assert User.query.get(user.id).reset_otp is not None                              # the owner does
+
+
+def test_deferment_fee_is_on_what_is_left(app_ctx):  # noqa: F811
+    """Founder, 2026-09-27: 10% of what's still owed on the instalment, after part payments."""
+    client, admin_h, plan = approved_plan(app_ctx)
+    p = InstalmentPayment.query.filter_by(plan_id=plan.id, installment_number=2).one()
+    customer = User.query.filter_by(role="customer").one()
+    ch = token(client, customer.phone)
+    q = client.get(f"/customer/plans/{plan.id}/deferment?payment_id={p.id}", headers=ch).get_json()
+    assert q["fee"] == 80.0 and q["fee_base"] == 800.0
+    payments.record_payment(p, 300, "mobile_money", "MM-DEF-300")
+    db.session.commit()
+    q = client.get(f"/customer/plans/{plan.id}/deferment?payment_id={p.id}", headers=ch).get_json()
+    assert q["allowed"] and q["fee_base"] == 500.0 and q["fee"] == 50.0

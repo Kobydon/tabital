@@ -1,6 +1,7 @@
 """Instalment deferment (CLAUDE.md §4, interim rule §13 #8).
 
-A customer may pay a deferment fee (10% of the instalment) to push an upcoming instalment back
+A customer may pay a deferment fee (10% of what's still owed on the instalment, founder 2026-09-27)
+to push an upcoming instalment back
 a month. The deferred instalment and every unpaid instalment after it move by the same amount,
 so no two payments land in the same month. The deferment isn't a late payment, so it doesn't
 lower the limit or tier.
@@ -30,9 +31,16 @@ def _setting(key, default):
     return SystemSetting.get_value(key, default)
 
 
+def fee_base(payment) -> Decimal:
+    """What's left to pay on the instalment (founder, 2026-09-27): the instalment minus any part
+    payments already received. Deferment is only allowed before a late fee, so none is included."""
+    left = Decimal(str(payment.amount)).quantize(CENT) - payment.part_paid()
+    return max(Decimal("0.00"), left)
+
+
 def fee_for(payment) -> Decimal:
     pct = Decimal(str(_setting("deferment_fee_percentage", 10)))
-    return (Decimal(str(payment.amount)) * pct / 100).quantize(CENT, ROUND_HALF_UP)
+    return (fee_base(payment) * pct / 100).quantize(CENT, ROUND_HALF_UP)
 
 
 def months():
@@ -104,6 +112,8 @@ def quote(plan, payment, today=None):
         "payment_id": payment.id if payment else None,
         "installment_number": payment.installment_number if payment else None,
         "instalment_amount": float(payment.amount) if payment else None,
+        # The fee is a % of what's still owed on the instalment (after any part payments)
+        "fee_base": float(fee_base(payment)) if payment else None,
         "fee": float(fee),
         "fee_percentage": float(_setting("deferment_fee_percentage", 10)),
         "months": n,
