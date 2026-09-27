@@ -123,3 +123,31 @@ def test_a_stranger_cant_use_up_the_owners_reset_allowance(app_ctx):  # noqa: F8
     res = client.post("/api/verify-otp", json={"email": "ama.k@example.com", "otp": "135790"},
                       headers={"X-Forwarded-For": "10.1.2.3"})                          # the owner isn't
     assert res.status_code == 200
+
+
+def test_merchants_only_get_in_through_kyb(app_ctx):  # noqa: F811
+    client = app_ctx.test_client()
+    admin_h = token(client, make_user("admin", "0200000709").phone)
+    m = make_user("merchant", "0200000710")
+    m.status, m.kyc_status = "pending", "pending"
+    db.session.commit()
+    assert client.post(f"/admin/approve/{m.id}", headers=admin_h, json={}).status_code == 400
+    assert client.put(f"/admin/merchants/{m.id}/kyc", headers=admin_h, json={"kyc_status": "verified"}).status_code == 410
+    m = User.query.get(m.id)
+    assert m.status == "pending" and m.kyc_status == "pending"
+
+
+def test_the_owner_still_gets_a_reset_code_from_a_known_address(app_ctx):  # noqa: F811
+    client = app_ctx.test_client()
+    user = make_user("customer", "0200000711", business_email="yaw@example.com")
+    assert client.post("/login", json={"phone": user.phone, "password": "Secret123!"},
+                       headers={"X-Forwarded-For": "10.20.0.1"}).status_code == 200      # the owner's address
+    from app.models.login_attempt import LoginAttempt
+    for i in range(10):                              # an attacker uses up today's allowance
+        db.session.add(LoginAttempt(kind="reset", subject=f"user:{user.id}", identifier="yaw@example.com",
+                                    ip=f"10.99.0.{i}", success=False))
+    db.session.commit()
+    client.post("/forgot-password", json={"email": "yaw@example.com"}, headers={"X-Forwarded-For": "10.99.0.50"})
+    assert User.query.get(user.id).reset_otp is None                                  # the attacker gets nothing
+    client.post("/forgot-password", json={"email": "yaw@example.com"}, headers={"X-Forwarded-For": "10.20.0.1"})
+    assert User.query.get(user.id).reset_otp is not None                              # the owner does

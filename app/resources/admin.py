@@ -52,6 +52,8 @@ class ApproveUserResource(Resource):
         from ..services import accounts
         if user.status in ("restricted", "suspended"):
             return {"error": "This account is restricted or suspended; reinstate it with a status change."}, 400
+        if user.role == "merchant" and user.kyc_status != "verified":
+            return {"error": "Merchants are approved through Merchant KYB, once their documents are checked."}, 400
         accounts.approve_after_checks(user)
         if user.role == "customer" and not user.customer_id:
             user.customer_id = user.generate_customer_id()
@@ -345,24 +347,13 @@ class MerchantStatsResource(Resource):
 
 
 class MerchantKYCResource(Resource):
+    """Turned off (go-live review): KYB is verified only by reviewing the merchant's documents on Merchant KYB; it can't be set by hand."""
+
     @auth_required
-    def put(self, merchant_id):
-        if current_user().role != "admin":
+    def put(self, *args, **kwargs):
+        if current_user().role != 'admin':
             return {"error": "Unauthorized"}, 403
-        m = User.query.get(merchant_id)
-        if not m or m.role != "merchant":
-            return {"error": "Merchant not found"}, 404
-        data = request.get_json()
-        if 'kyc_status' in data:
-            m.kyc_status = data['kyc_status']
-        if 'verification_level' in data:
-            m.verification_level = data['verification_level']
-        if 'aml_screening' in data:
-            m.aml_screening = data['aml_screening']
-        if data.get('kyc_status') == 'verified':
-            m.kyc_completed_on = datetime.utcnow()
-        db.session.commit()
-        return {"message": "KYC updated successfully"}
+        return {"error": "KYB is verified only by reviewing the merchant's documents on Merchant KYB; it can't be set by hand."}, 410
 
 
 class MerchantCommissionResource(Resource):

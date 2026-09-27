@@ -199,7 +199,13 @@ class ForgotPasswordResource(Resource):
         issued_today = LoginAttempt.query.filter(LoginAttempt.kind == LoginAttempt.RESET,
                                                  LoginAttempt.subject == attempts.subject_for(user, email),
                                                  LoginAttempt.created_at >= now - timedelta(days=1)).count()
-        if issued_today >= current_app.config.get('RESET_CODES_PER_ACCOUNT_PER_DAY', 20):
+        # The owner asking from an address they've signed in from before still gets a code, so someone
+        # using up the allowance can't lock them out
+        known_address = bool(ip) and LoginAttempt.query.filter(
+            LoginAttempt.kind == LoginAttempt.LOGIN, LoginAttempt.subject == attempts.subject_for(user, email),
+            LoginAttempt.ip == ip, LoginAttempt.success.is_(True),
+            LoginAttempt.created_at >= now - timedelta(days=30)).first() is not None
+        if issued_today >= current_app.config.get('RESET_CODES_PER_ACCOUNT_PER_DAY', 10) and not known_address:
             return _generic_reset_response()
         attempts.begin(LoginAttempt.RESET, attempts.subject_for(user, email), email, ip, now)
 

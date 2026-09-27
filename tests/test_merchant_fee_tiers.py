@@ -78,7 +78,7 @@ def test_tier_is_optional_at_approval_and_management_only(app_ctx):  # noqa: F81
 
     # Approving without a tier leaves the standard tier
     other = make_user("merchant", "0200000404")
-    other.status = "pending"
+    other.status, other.kyc_status = "pending", "verified"      # KYB passed
     db.session.commit()
     assert client.post(f"/admin/approve/{other.id}", headers=admin_h, json={}).status_code == 200
     assert merchant_fees.tier_of(User.query.get(other.id)) == "standard"
