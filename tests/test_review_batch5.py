@@ -165,3 +165,17 @@ def test_deferment_fee_is_on_what_is_left(app_ctx):  # noqa: F811
     db.session.commit()
     q = client.get(f"/customer/plans/{plan.id}/deferment?payment_id={p.id}", headers=ch).get_json()
     assert q["allowed"] and q["fee_base"] == 500.0 and q["fee"] == 50.0
+
+
+def test_suspension_takes_effect_on_the_next_request(app_ctx):  # noqa: F811
+    client = app_ctx.test_client()
+    user = make_user("customer", "0200000712")
+    h = token(client, user.phone)                          # signed in before the suspension
+    assert client.get("/customer/credit", headers=h).status_code == 200
+    user.status = "suspended"
+    db.session.commit()
+    res = client.get("/customer/credit", headers=h)
+    assert res.status_code == 401 and res.get_json()["code"] == "account_inactive"
+    user.status = "active"                                 # reinstated: the same token works again
+    db.session.commit()
+    assert client.get("/customer/credit", headers=h).status_code == 200

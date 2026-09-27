@@ -91,7 +91,12 @@ def register_access_control(app):
             user = User.query.get(data.get("id"))
         except Exception:        # bad or expired token: the endpoint's own auth check answers
             return None
-        if not user or user.role != "admin" or access.is_management(user):
+        # A suspended, rejected or pending account loses access at once, not when its token expires
+        # (flask_praetorian only checks is_valid when a token is issued or refreshed)
+        if user is None or not user.is_valid():
+            return {"error": "Your account isn't active. Please contact Tabital.",
+                    "code": "account_inactive"}, 401
+        if user.role != "admin" or access.is_management(user):
             return None
         if access.needs_management(request.method, request.path):
             return {"error": access.MESSAGE, "code": "management_required"}, 403

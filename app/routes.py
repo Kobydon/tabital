@@ -609,20 +609,20 @@ def register_routes(app):
     # ============================================
     # ADMIN - CUSTOMER ROUTES
     # ============================================
-    api.add_resource(GetCustomersResource, "/admin/customers")
+    # api.add_resource(GetCustomersResource, "/admin/customers")   # old duplicate: shadowed the current endpoint (admin_customers/admin_merchants)
     api.add_resource(CustomerResource, "/admin/customers/<int:customer_id>")
     api.add_resource(BulkUpdateCustomersResource, "/admin/customers/bulk-update")
     api.add_resource(SearchCustomersResource, "/admin/customers/search")
-    api.add_resource(CustomerStatsResource, "/admin/customers/stats")
+    # api.add_resource(CustomerStatsResource, "/admin/customers/stats")   # old duplicate: shadowed the current endpoint (admin_customers/admin_merchants)
     api.add_resource(ExportCustomersResource, "/admin/customers/export")
 
     # ============================================
     # ADMIN - MERCHANT ROUTES
     # ============================================
-    api.add_resource(GetMerchantsResource, "/admin/merchants")
+    # api.add_resource(GetMerchantsResource, "/admin/merchants")   # old duplicate: shadowed the current endpoint (admin_customers/admin_merchants)
     api.add_resource(MerchantResource, "/admin/merchants/<int:merchant_id>")
     api.add_resource(VerifyMerchantResource, "/admin/merchants/verify/<int:merchant_id>")
-    api.add_resource(MerchantStatsResource, "/admin/merchants/stats")
+    # api.add_resource(MerchantStatsResource, "/admin/merchants/stats")   # old duplicate: shadowed the current endpoint (admin_customers/admin_merchants)
     
     api.add_resource(MerchantKYCResource, "/admin/merchants/<int:merchant_id>/kyc")
     api.add_resource(MerchantCommissionResource, "/admin/merchants/<int:merchant_id>/commission")

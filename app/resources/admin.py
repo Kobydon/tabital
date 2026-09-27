@@ -140,6 +140,12 @@ def _deactivate(user):
 class CustomerResource(Resource):
     @auth_required
     def get(self, customer_id):
+        # This route shares its address with AdminGetCustomerDetailResource and is matched first:
+        # GET answers with the current detail (customer + financial + activity), PUT/DELETE stay here
+        from .admin_customers import AdminGetCustomerDetailResource
+        return AdminGetCustomerDetailResource().get(customer_id)
+
+    def _legacy_get(self, customer_id):
         if current_user().role != "admin":
             return {"error": "Unauthorized"}, 403
         user = User.query.get(customer_id)
@@ -223,6 +229,12 @@ class GetMerchantsResource(Resource):
 class MerchantResource(Resource):
     @auth_required
     def get(self, merchant_id):
+        # Shares its address with AdminGetMerchantDetailResource and is matched first: GET answers with
+        # the current detail (merchant + financial + bank details + recent sales), PUT/DELETE stay here
+        from .admin_merchants import AdminGetMerchantDetailResource
+        return AdminGetMerchantDetailResource().get(merchant_id)
+
+    def _legacy_get(self, merchant_id):
         if current_user().role != "admin":
             return {"error": "Unauthorized"}, 403
         m = User.query.get(merchant_id)

@@ -21,7 +21,7 @@ Decisions and actions only you can take.
 | F3 | Set a new `SECRET_KEY` in Render | Signs all tokens; the old deployment's key can't be trusted | **Blocks go-live** |
 | F4 | **History decision (item 5):** push as is, or rewrite the history with `git filter-repo` first (`git_push_checklist.md` section b) | The passwords and `instance/app.db` stay in old commits unless the history is rewritten. A rewrite must happen **before** pushing | **Blocks the push** (decide first) |
 | F5 | **Push both repos (item 6)** with your GitHub login (`git_push_checklist.md`) | None of the work since Phase 0 is on GitHub, and nobody else can push | **Blocks go-live** |
-| F6 | Sign in to the admin app so the browser click-through of masking, reveal and Team and access can be done (item 13) | Those controls are only tested by automated tests so far, not in a real browser | **Blocks go-live** |
+| F6 | ~~Sign in for the browser click-through~~ **Done 2026-09-27** (signed in as the Management admin). One last check remains: sign in as the Operations admin (0200000004) so its limits can be seen in the browser | The Management side is confirmed in a browser; Operations limits are confirmed by automated tests | Soon after |
 
 ### Render, vendors and accounts
 
@@ -75,8 +75,8 @@ Found in CLAUDE.md, `docs/` and the code. A search for `TODO` / `FIXME` found no
 
 | # | What's missing | What we found | When |
 |---|---|---|---|
-| E1 | **Browser click-through (item 13)** of masking, reveal and Team and access | Waiting for you to sign in (F6) | **Blocks go-live** |
-| E2 | **The session isn't cut when an account is suspended** | `flask_praetorian` checks the account status (`User.is_valid`) only at sign-in and token refresh, not on each request. A suspended or rejected user keeps working until their token expires, up to `JWT_ACCESS_MINUTES` (60). The note in `app/models/user.py` says "every request", which isn't true. Admin access levels are re-checked on every request, so demoting an admin works at once | Soon after |
+| E1 | **Browser click-through (item 13): done for Management**, 2026-09-27. Masked phone and Ghana Card on Customers; Reveal needs a reason, shows the value, re-masks on Hide and is logged on Personal data access; Team and access lists both admins with masked phones. It found and fixed a real bug: old duplicate routes answered /admin/customers and /admin/merchants (list, detail, stats), so the detail dialog was empty. Left: the same walk-through as the Operations admin (F6) | Soon after |
+| E2 | ~~The session isn't cut when an account is suspended~~ **Fixed 2026-09-27**: every signed-in request checks the account status, so suspending (or rejecting) takes effect on the next request; the app signs the person out with a plain message. An expired session now also returns to the sign-in page instead of showing a raw error | Done |
 | E3 | **Customers can't pay part of an instalment** in the app | Part payments exist only for Management in Collections (money received outside Paystack). The customer Make Payment page always charges the full amount due | Soon after |
 | E4 | **CSV exports aren't logged** | Exports are Management-only, but only personal-data reveals are written to the access log (`pii_access`). Exports hold unmasked data | Soon after |
 | E5 | **The merchant's payout account isn't on the admin merchant detail** | The detail shows only the older `momo_name` / `momo_number` fields. The Paystack payout account (MoMo or bank) is visible only inside a settlement batch | Soon after |
