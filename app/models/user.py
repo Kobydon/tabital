@@ -131,7 +131,8 @@ class User(db.Model):
         return cls.query.get(id)
     
     def is_valid(self):
-        """Checked by flask_praetorian on sign-in and every request. 'active' is the status admins set
+        """Checked by flask_praetorian when a token is issued or refreshed (not on every request, so a
+        suspended user keeps access until their token expires, JWT_ACCESS_MINUTES). 'active' is the status admins set
         to reinstate an account; 'restricted' can still sign in to pay (not buy: customer_purchase.py)."""
         return self.status in ('approved', 'active', 'restricted')
     
