@@ -1,6 +1,8 @@
 # resources/customer_dashboard.py
 from flask_restful import Resource, request
 from flask_praetorian import auth_required, current_user
+
+from app.models.purchase_order import PurchaseOrder
 from ..models.user import User
 from ..models.transaction import Transaction
 from ..models.instalment import InstalmentPlan
@@ -8,7 +10,8 @@ from ..models.instalment_payment import InstalmentPayment
 from ..extensions import db
 from datetime import datetime, timedelta
 from sqlalchemy import func, and_
-
+from ..extensions import *
+from flask_mail import Message
 def safe_str(v): return v if v is not None else ""
 def safe_float(v): return v if v is not None else 0.0
 def safe_int(v): return v if v is not None else 0

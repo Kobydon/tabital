@@ -10,7 +10,7 @@ from datetime import datetime
 import os
 import base64
 import json
-
+from ..extensions import db, mail
 
 class AdminGetPendingKYCResource(Resource):
     @auth_required
@@ -239,6 +239,9 @@ class AdminGetMerchantKYCResource(Resource):
             }
         }, 200
 
+# Add this import at the top if not already present
+from ..extensions import mail
+from flask_mail import Message
 
 class AdminApproveKYCResource(Resource):
     @auth_required
@@ -280,7 +283,136 @@ class AdminApproveKYCResource(Resource):
             
             db.session.commit()
             
-            # Create notification for the merchant
+            # --- SEND EMAIL NOTIFICATION ---
+            try:
+                msg = Message(
+                    subject="✅ KYC Verification Approved - Tabital Pay",
+                    recipients=[merchant.business_email or merchant.email],
+                    html=f"""
+                    <!DOCTYPE html>
+                    <html>
+                    <head>
+                        <meta charset="UTF-8">
+                        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                        <title>KYC Approved - Tabital Pay</title>
+                        <style>
+                            body {{
+                                font-family: Arial, sans-serif;
+                                background-color: #f5f7fa;
+                                margin: 0;
+                                padding: 0;
+                            }}
+                            .container {{
+                                max-width: 600px;
+                                margin: 0 auto;
+                                background: white;
+                                border-radius: 16px;
+                                overflow: hidden;
+                                box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+                            }}
+                            .header {{
+                                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                                padding: 30px;
+                                text-align: center;
+                            }}
+                            .header h1 {{
+                                color: white;
+                                margin: 0;
+                                font-size: 28px;
+                            }}
+                            .content {{
+                                padding: 30px;
+                            }}
+                            .success-badge {{
+                                background: #10b981;
+                                color: white;
+                                padding: 10px 20px;
+                                border-radius: 30px;
+                                display: inline-block;
+                                font-weight: 600;
+                                margin: 20px 0;
+                            }}
+                            .feature-list {{
+                                background: #f0fdf4;
+                                padding: 20px;
+                                border-radius: 12px;
+                                margin: 20px 0;
+                                border-left: 4px solid #10b981;
+                            }}
+                            .feature-list li {{
+                                margin: 10px 0;
+                                color: #065f46;
+                            }}
+                            .button {{
+                                display: inline-block;
+                                padding: 12px 30px;
+                                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                                color: white;
+                                text-decoration: none;
+                                border-radius: 30px;
+                                margin: 20px 0;
+                            }}
+                            .footer {{
+                                padding: 20px;
+                                text-align: center;
+                                background: #f8f9fa;
+                                color: #6c757d;
+                                font-size: 12px;
+                            }}
+                        </style>
+                    </head>
+                    <body>
+                        <div class="container">
+                            <div class="header">
+                                <h1>🎉 Tabital Pay</h1>
+                            </div>
+                            <div class="content">
+                                <div style="text-align: center;">
+                                    <div class="success-badge">✅ KYC VERIFIED</div>
+                                </div>
+                                <h2>Congratulations, {merchant.business_name or merchant.full_name or 'Merchant'}!</h2>
+                                <p>We are pleased to inform you that your KYC verification has been <strong>approved</strong>.</p>
+                                <p>Your account status has been updated to <strong>approved</strong>. You now have full access to all merchant features:</p>
+                                
+                                <div class="feature-list">
+                                    <ul style="list-style: none; padding: 0;">
+                                        <li>✅ Add and manage products</li>
+                                        <li>✅ Receive payments from customers</li>
+                                        <li>✅ Access all merchant features</li>
+                                        <li>✅ Apply for merchant loans</li>
+                                        <li>✅ View analytics and reports</li>
+                                    </ul>
+                                </div>
+                                
+                                <p>You can now log in to your merchant dashboard to start using all these features.</p>
+                                
+                                <div style="text-align: center;">
+                                    <a href="https://tabitalpay.com/merchant/dashboard" class="button">Go to Dashboard</a>
+                                </div>
+                                
+                                <p style="color: #6b7280; font-size: 14px; margin-top: 20px;">
+                                    <strong>Verification Details:</strong><br>
+                                    Verified by: {current_admin.full_name or 'Admin'}<br>
+                                    Verification Date: {datetime.now().strftime('%B %d, %Y at %I:%M %p')}
+                                </p>
+                            </div>
+                            <div class="footer">
+                                <p>&copy; 2024 Tabital Pay. All rights reserved.</p>
+                                <p>Secure payment platform for your business</p>
+                            </div>
+                        </div>
+                    </body>
+                    </html>
+                    """
+                )
+                mail.send(msg)
+                print(f"KYC approval email sent to {merchant.business_email or merchant.email}")
+                
+            except Exception as e:
+                print(f"Error sending KYC approval email: {e}")
+                # Continue with the process even if email fails
+            
+            # Create in-app notification for the merchant
             try:
                 notification_title = "KYB verification approved"
                 notification_message = (f"Your business {merchant.business_name or merchant.full_name} is verified and "
@@ -329,6 +461,7 @@ class AdminApproveKYCResource(Resource):
                 **merchant_fees.describe(merchant),   # fee tier (§6.1)
                 "kyc_status": "verified",
                 "user_status": merchant.status,
+                "email_sent": True,
                 "notification_sent": True
             }, 200
             
@@ -336,8 +469,6 @@ class AdminApproveKYCResource(Resource):
             db.session.rollback()
             print(f"Error approving KYC: {str(e)}")
             return {"error": f"Failed to approve KYC: {str(e)}"}, 500
-
-
 class AdminRejectKYCResource(Resource):
     @auth_required
     def put(self, merchant_id):
@@ -371,6 +502,134 @@ class AdminRejectKYCResource(Resource):
             # Keep user status as 'pending' (do not change to approved)
             
             db.session.commit()
+            
+            # --- SEND EMAIL NOTIFICATION ---
+            try:
+                msg = Message(
+                    subject="❌ KYC Verification Rejected - Tabital Pay",
+                    recipients=[merchant.business_email or merchant.email],
+                    html=f"""
+                    <!DOCTYPE html>
+                    <html>
+                    <head>
+                        <meta charset="UTF-8">
+                        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                        <title>KYC Rejected - Tabital Pay</title>
+                        <style>
+                            body {{
+                                font-family: Arial, sans-serif;
+                                background-color: #f5f7fa;
+                                margin: 0;
+                                padding: 0;
+                            }}
+                            .container {{
+                                max-width: 600px;
+                                margin: 0 auto;
+                                background: white;
+                                border-radius: 16px;
+                                overflow: hidden;
+                                box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+                            }}
+                            .header {{
+                                background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+                                padding: 30px;
+                                text-align: center;
+                            }}
+                            .header h1 {{
+                                color: white;
+                                margin: 0;
+                                font-size: 28px;
+                            }}
+                            .content {{
+                                padding: 30px;
+                            }}
+                            .rejection-badge {{
+                                background: #ef4444;
+                                color: white;
+                                padding: 10px 20px;
+                                border-radius: 30px;
+                                display: inline-block;
+                                font-weight: 600;
+                                margin: 20px 0;
+                            }}
+                            .reason-box {{
+                                background: #fef2f2;
+                                padding: 20px;
+                                border-radius: 12px;
+                                margin: 20px 0;
+                                border-left: 4px solid #ef4444;
+                            }}
+                            .button {{
+                                display: inline-block;
+                                padding: 12px 30px;
+                                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                                color: white;
+                                text-decoration: none;
+                                border-radius: 30px;
+                                margin: 20px 0;
+                            }}
+                            .footer {{
+                                padding: 20px;
+                                text-align: center;
+                                background: #f8f9fa;
+                                color: #6c757d;
+                                font-size: 12px;
+                            }}
+                        </style>
+                    </head>
+                    <body>
+                        <div class="container">
+                            <div class="header">
+                                <h1>❌ Tabital Pay</h1>
+                            </div>
+                            <div class="content">
+                                <div style="text-align: center;">
+                                    <div class="rejection-badge">❌ KYC REJECTED</div>
+                                </div>
+                                <h2>Dear {merchant.business_name or merchant.full_name or 'Merchant'},</h2>
+                                <p>We regret to inform you that your KYC verification has been <strong>rejected</strong>.</p>
+                                
+                                <div class="reason-box">
+                                    <h3 style="color: #991b1b; margin-top: 0;">Rejection Reason:</h3>
+                                    <p style="color: #991b1b; font-size: 16px;">{rejection_reason}</p>
+                                </div>
+                                
+                                <h3>What to do next:</h3>
+                                <ul>
+                                    <li>Review the rejection reason above</li>
+                                    <li>Ensure all documents are clear and readable</li>
+                                    <li>Check that documents are not expired</li>
+                                    <li>Verify all information matches your business registration</li>
+                                    <li>Make sure all required documents are uploaded</li>
+                                </ul>
+                                
+                                <p>Please upload corrected documents for re-verification.</p>
+                                
+                                <div style="text-align: center;">
+                                    <a href="https://tabitalpay.com/merchant/documents" class="button">Upload Documents Again</a>
+                                </div>
+                                
+                                <p style="color: #6b7280; font-size: 14px; margin-top: 20px;">
+                                    <strong>Review Details:</strong><br>
+                                    Reviewed by: {current_admin.full_name or 'Admin'}<br>
+                                    Review Date: {datetime.now().strftime('%B %d, %Y at %I:%M %p')}
+                                </p>
+                            </div>
+                            <div class="footer">
+                                <p>&copy; 2024 Tabital Pay. All rights reserved.</p>
+                                <p>Secure payment platform for your business</p>
+                            </div>
+                        </div>
+                    </body>
+                    </html>
+                    """
+                )
+                mail.send(msg)
+                print(f"KYC rejection email sent to {merchant.business_email or merchant.email}")
+                
+            except Exception as e:
+                print(f"Error sending KYC rejection email: {e}")
+                # Continue with the process even if email fails
             
             # Create notification for the merchant
             try:
@@ -429,6 +688,7 @@ Please upload corrected documents for re-verification."""
                 **merchant_fees.describe(merchant),   # fee tier (§6.1)
                 "kyc_status": "rejected",
                 "rejection_reason": rejection_reason,
+                "email_sent": True,
                 "notification_sent": True
             }, 200
             
@@ -436,7 +696,6 @@ Please upload corrected documents for re-verification."""
             db.session.rollback()
             print(f"Error rejecting KYC: {str(e)}")
             return {"error": f"Failed to reject KYC: {str(e)}"}, 500
-
 
 class AdminApproveDocumentResource(Resource):
     @auth_required
