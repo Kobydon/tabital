@@ -14,6 +14,7 @@ class User(db.Model):
     # Role-specific IDs
     customer_id = db.Column(db.String(50), unique=True, nullable=True, index=True)
     merchant_id = db.Column(db.String(50), unique=True, nullable=True, index=True)
+    monthly_salary = db.Column(db.String(100))
 
     # Customer Fields
     full_name = db.Column(db.String(100))
